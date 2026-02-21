@@ -103,6 +103,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/receipts/export/csv", post(handlers::export_receipts_csv))
         
         // Chat
+        .route("/api/chat/proximity-contacts", get(handlers::get_proximity_contacts))
         .route("/api/chat/:user_id/send", post(handlers::send_message))
         .route("/api/chat/:user_id/messages", post(handlers::get_messages))
         .route("/api/chat/:user_id/messages/:message_id/read", post(handlers::mark_message_read))
@@ -126,6 +127,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // Privacy & Wallet Management
         .route("/api/privacy/:user_id/temporary-wallets", get(handlers::get_temporary_wallets))
         .route("/api/privacy/:user_id/temporary-wallets", post(handlers::create_temporary_wallet))
+        .route("/api/privacy/:user_id/temporary-wallets/:wallet_id/primary", put(handlers::set_primary_temporary_wallet))
         .route("/api/privacy/:user_id/wallets/:wallet_address/freeze", post(handlers::freeze_wallet))
         .route("/api/privacy/:user_id/wallets/:wallet_address/unfreeze", post(handlers::unfreeze_wallet))
         .route("/api/privacy/wallets/:wallet_address/frozen", get(handlers::check_wallet_frozen))

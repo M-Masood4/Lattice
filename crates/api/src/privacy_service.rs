@@ -15,6 +15,8 @@ pub struct TemporaryWallet {
     pub temp_tag: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    pub is_primary: bool,
+    pub is_frozen: bool,
 }
 
 /// Privacy and wallet management service
@@ -71,24 +73,45 @@ impl PrivacyService {
 
         let id = Uuid::new_v4();
         let expires_at = Utc::now() + Duration::hours(expires_in_hours);
+        let expires_at_systime = std::time::SystemTime::from(expires_at);
         
         // NOTE: Full implementation would generate actual wallet address
         let address = format!("temp_wallet_{}", id);
 
-        let row = client
-            .query_one(
-                r#"
-                INSERT INTO multi_chain_wallets (
-                    id, user_id, blockchain, address, is_primary,
-                    is_temporary, temp_tag, expires_at, created_at
-                )
-                VALUES ($1, $2, $3, $4, FALSE, TRUE, $5, $6, NOW())
-                RETURNING id, user_id, blockchain, address, temp_tag, expires_at, created_at
-                "#,
-                &[&id, &user_id, &blockchain, &address, &tag, &expires_at],
-            )
-            .await
-            .map_err(|e| Error::Database(format!("Failed to create temporary wallet: {}", e)))?;
+        let row = match &tag {
+            Some(t) => {
+                client
+                    .query_one(
+                        r#"
+                        INSERT INTO multi_chain_wallets (
+                            id, user_id, blockchain, address, is_primary,
+                            is_temporary, temp_tag, expires_at, created_at
+                        )
+                        VALUES ($1, $2, $3, $4, FALSE, TRUE, $5, $6, NOW())
+                        RETURNING id, user_id, blockchain, address, temp_tag, expires_at, created_at
+                        "#,
+                        &[&id, &user_id, &blockchain, &address, &t.as_str(), &expires_at_systime],
+                    )
+                    .await
+                    .map_err(|e| Error::Database(format!("Failed to create temporary wallet: {}", e)))?
+            }
+            None => {
+                client
+                    .query_one(
+                        r#"
+                        INSERT INTO multi_chain_wallets (
+                            id, user_id, blockchain, address, is_primary,
+                            is_temporary, temp_tag, expires_at, created_at
+                        )
+                        VALUES ($1, $2, $3, $4, FALSE, TRUE, NULL, $5, NOW())
+                        RETURNING id, user_id, blockchain, address, temp_tag, expires_at, created_at
+                        "#,
+                        &[&id, &user_id, &blockchain, &address, &expires_at_systime],
+                    )
+                    .await
+                    .map_err(|e| Error::Database(format!("Failed to create temporary wallet: {}", e)))?
+            }
+        };
 
         let created_at_systime: std::time::SystemTime = row
             .try_get("created_at")
@@ -103,6 +126,8 @@ impl PrivacyService {
             temp_tag: row.try_get("temp_tag").ok(),
             expires_at: expires_at_systime.map(DateTime::<Utc>::from),
             created_at: DateTime::<Utc>::from(created_at_systime),
+            is_primary: false, // Default to false for newly created wallets
+            is_frozen: false, // Default to false for newly created wallets
         })
     }
 
@@ -238,7 +263,7 @@ impl PrivacyService {
 
         let rows = client
             .query(
-                "SELECT id, user_id, blockchain, address, temp_tag, expires_at, created_at
+                "SELECT id, user_id, blockchain, address, temp_tag, expires_at, created_at, is_primary, is_frozen
                  FROM multi_chain_wallets
                  WHERE user_id = $1 AND is_temporary = TRUE
                  ORDER BY created_at DESC",
@@ -249,14 +274,23 @@ impl PrivacyService {
 
         let wallets = rows
             .iter()
-            .map(|row| TemporaryWallet {
-                id: row.get(0),
-                user_id: row.get(1),
-                blockchain: row.get(2),
-                address: row.get(3),
-                temp_tag: row.get(4),
-                expires_at: row.get(5),
-                created_at: row.get(6),
+            .map(|row| {
+                let expires_at_systime: Option<std::time::SystemTime> = row.get(5);
+                let created_at_systime: std::time::SystemTime = row.get(6);
+                let is_primary: bool = row.get(7);
+                let is_frozen: bool = row.get(8);
+                
+                TemporaryWallet {
+                    id: row.get(0),
+                    user_id: row.get(1),
+                    blockchain: row.get(2),
+                    address: row.get(3),
+                    temp_tag: row.get(4),
+                    expires_at: expires_at_systime.map(DateTime::<Utc>::from),
+                    created_at: DateTime::<Utc>::from(created_at_systime),
+                    is_primary,
+                    is_frozen,
+                }
             })
             .collect();
 
@@ -376,6 +410,56 @@ impl PrivacyService {
             .ok_or_else(|| Error::Internal("User not found".to_string()))?;
 
         Ok(row.get(0))
+    }
+
+    /// Set primary wallet
+    /// 
+    /// Sets a temporary wallet as the primary/active wallet for the user.
+    /// All other temporary wallets for the user will be set to non-primary.
+    pub async fn set_primary_wallet(&self, user_id: Uuid, wallet_id: Uuid) -> Result<()> {
+        info!("Setting wallet {} as primary for user {}", wallet_id, user_id);
+
+        let client = self.db.get().await.map_err(|e| {
+            Error::Database(format!("Failed to get database connection: {}", e))
+        })?;
+
+        // First, verify the wallet exists and belongs to the user
+        let wallet_exists = client
+            .query_opt(
+                "SELECT id FROM multi_chain_wallets WHERE id = $1 AND user_id = $2 AND is_temporary = TRUE",
+                &[&wallet_id, &user_id],
+            )
+            .await
+            .map_err(|e| Error::Database(format!("Failed to verify wallet: {}", e)))?;
+
+        if wallet_exists.is_none() {
+            return Err(Error::WalletNotFound("Wallet not found or not a temporary wallet".to_string()));
+        }
+
+        // Set all user's temporary wallets to non-primary
+        client
+            .execute(
+                "UPDATE multi_chain_wallets SET is_primary = FALSE WHERE user_id = $1 AND is_temporary = TRUE",
+                &[&user_id],
+            )
+            .await
+            .map_err(|e| Error::Database(format!("Failed to reset primary flags: {}", e)))?;
+
+        // Set the specified wallet as primary
+        let rows_updated = client
+            .execute(
+                "UPDATE multi_chain_wallets SET is_primary = TRUE WHERE id = $1 AND user_id = $2",
+                &[&wallet_id, &user_id],
+            )
+            .await
+            .map_err(|e| Error::Database(format!("Failed to set primary wallet: {}", e)))?;
+
+        if rows_updated == 0 {
+            return Err(Error::Internal("Failed to update wallet".to_string()));
+        }
+
+        info!("Successfully set wallet {} as primary for user {}", wallet_id, user_id);
+        Ok(())
     }
 
     /// Set user tag

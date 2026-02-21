@@ -1694,49 +1694,58 @@ function initializeChatView() {
 }
 
 async function loadContacts() {
-    // Chat is a demo feature - using mock contacts
-    displayMockContacts();
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/chat/proximity-contacts`);
+        
+        if (!response.ok) {
+            throw new Error('Failed to load proximity contacts');
+        }
+        
+        const data = await response.json();
+        const contacts = data.data || [];
+        
+        if (contacts.length === 0) {
+            document.getElementById('contactsList').innerHTML = 
+                '<p class="empty-state">No users in proximity network. Enable discovery to find nearby users.</p>';
+            return;
+        }
+        
+        displayProximityContacts(contacts);
+        
+    } catch (error) {
+        console.error('Error loading proximity contacts:', error);
+        document.getElementById('contactsList').innerHTML = 
+            '<p class="empty-state">Failed to load contacts. Make sure discovery is enabled.</p>';
+    }
 }
 
-function displayContacts(contacts) {
+function displayProximityContacts(contacts) {
     const container = document.getElementById('contactsList');
-    
-    if (contacts.length === 0) {
-        container.innerHTML = '<p class="empty-state">No contacts yet</p>';
-        return;
-    }
-    
     container.innerHTML = '';
+    
     contacts.forEach(contact => {
         const item = document.createElement('div');
         item.className = 'contact-item';
-        item.onclick = () => selectContact(contact);
+        item.onclick = () => selectProximityContact(contact);
+        
+        const signalIcon = contact.signal_strength ? 
+            `<span class="signal-strength" title="Signal: ${contact.signal_strength}dBm">📶</span>` : '';
         
         item.innerHTML = `
             <div class="contact-avatar">${contact.user_tag.substring(0, 2)}</div>
             <div class="contact-info">
                 <div class="contact-name">${contact.user_tag}</div>
-                <div class="contact-status">${contact.is_verified ? '✓ Verified' : 'Unverified'}</div>
+                <div class="contact-status">${contact.discovery_method} ${signalIcon}</div>
             </div>
-            ${contact.unread_count > 0 ? `<div class="unread-badge">${contact.unread_count}</div>` : ''}
         `;
         
         container.appendChild(item);
     });
 }
 
-function displayMockContacts() {
-    const mockContacts = [
-        { id: '1', user_tag: 'Trader_A7X9K2', is_verified: true, unread_count: 2 },
-        { id: '2', user_tag: 'Trader_B3M5L8', is_verified: false, unread_count: 0 },
-        { id: '3', user_tag: 'Trader_C9P2Q4', is_verified: true, unread_count: 0 }
-    ];
-    displayContacts(mockContacts);
-}
-
 let selectedContact = null;
 
-function selectContact(contact) {
+function selectProximityContact(contact) {
     selectedContact = contact;
     
     // Update UI
@@ -1749,19 +1758,20 @@ function selectContact(contact) {
     document.getElementById('chatInput').disabled = false;
     document.getElementById('sendMessageBtn').disabled = false;
     
-    // Load chat history for this contact
-    loadChatHistory(contact.id);
+    // Load chat history for this contact (by wallet address)
+    loadChatHistory(contact.wallet_address);
 }
 
-async function loadChatHistory(contactId = null) {
-    if (!contactId) {
+async function loadChatHistory(contactWalletAddress = null) {
+    if (!contactWalletAddress) {
         document.getElementById('chatMessages').innerHTML = 
             '<p class="empty-state">Select a contact to start chatting</p>';
         return;
     }
     
-    // Chat is a demo feature - using mock messages
-    displayMockChatHistory();
+    // For now, show empty state - actual message loading would require user ID mapping
+    document.getElementById('chatMessages').innerHTML = 
+        '<p class="empty-state">Chat with proximity users (demo mode). Messages are encrypted end-to-end.</p>';
 }
 
 function displayChatMessages(messages) {
@@ -1990,7 +2000,7 @@ async function createTempWallet() {
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/temp-wallets`, {
+        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/temporary-wallets`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2021,7 +2031,7 @@ async function createTempWallet() {
 async function loadTempWallets() {
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/temp-wallets`);
+        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/temporary-wallets`);
         
         if (!response.ok) throw new Error('Failed to load temporary wallets');
         
@@ -2036,10 +2046,22 @@ async function loadTempWallets() {
 
 function displayTempWallets(wallets) {
     const container = document.getElementById('tempWalletsList');
+    const activeWalletInfo = document.getElementById('activeWalletInfo');
+    const activeWalletName = document.getElementById('activeWalletName');
     
     if (wallets.length === 0) {
         container.innerHTML = '<p class="empty-state">No temporary wallets. Create one to get started!</p>';
+        activeWalletInfo.classList.add('hidden');
         return;
+    }
+    
+    // Find and display active wallet
+    const activeWallet = wallets.find(w => w.is_primary);
+    if (activeWallet) {
+        activeWalletName.textContent = `${activeWallet.temp_tag || 'Unnamed'} (${formatChainName(activeWallet.blockchain)})`;
+        activeWalletInfo.classList.remove('hidden');
+    } else {
+        activeWalletInfo.classList.add('hidden');
     }
     
     container.innerHTML = '';
@@ -2056,14 +2078,21 @@ function displayTempWallets(wallets) {
         item.innerHTML = `
             <div class="wallet-info">
                 <div class="wallet-header">
-                    <div class="wallet-tag">${wallet.tag}</div>
+                    <div class="wallet-tag">${wallet.temp_tag || 'Unnamed'}</div>
                     <div class="wallet-chain-badge">${formatChainName(wallet.blockchain)}</div>
+                    ${wallet.is_primary ? '<span class="primary-badge">Active</span>' : ''}
+                    ${wallet.is_frozen ? '<span class="frozen-badge">Frozen</span>' : ''}
                     ${isExpired ? '<span class="expired-badge">Expired</span>' : ''}
                 </div>
                 <div class="wallet-address">${wallet.address}</div>
                 <div class="wallet-expiry">${expiryText}</div>
             </div>
             <div class="wallet-actions">
+                ${!wallet.is_primary ? `<button class="btn btn-primary btn-sm" onclick="setWalletAsPrimary('${wallet.id}')">Set as Active</button>` : ''}
+                ${wallet.is_frozen ? 
+                    `<button class="btn btn-warning btn-sm" onclick="unfreezeTempWallet('${wallet.address}')">Unfreeze</button>` :
+                    `<button class="btn btn-secondary btn-sm" onclick="freezeTempWallet('${wallet.address}')">Freeze</button>`
+                }
                 <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${wallet.address}')">Copy Address</button>
                 <button class="btn btn-secondary btn-sm" onclick="deleteTempWallet('${wallet.id}')">Delete</button>
             </div>
@@ -2077,17 +2106,19 @@ function displayMockTempWallets() {
     const mockWallets = [
         {
             id: '1',
-            tag: 'Trading_Bot_1',
+            temp_tag: 'Trading_Bot_1',
             blockchain: 'solana',
             address: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
-            expires_at: new Date(Date.now() + 86400000 * 7).toISOString()
+            expires_at: new Date(Date.now() + 86400000 * 7).toISOString(),
+            is_primary: true
         },
         {
             id: '2',
-            tag: 'DeFi_Experiments',
+            temp_tag: 'DeFi_Experiments',
             blockchain: 'ethereum',
             address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
-            expires_at: null
+            expires_at: null,
+            is_primary: false
         }
     ];
     displayTempWallets(mockWallets);
@@ -2101,8 +2132,13 @@ async function deleteTempWallet(walletId) {
     showLoading();
     
     try {
+        // TODO: Backend DELETE endpoint not implemented yet
+        showToast('Delete functionality coming soon', 'warning');
+        return;
+        
+        /* Uncomment when backend implements DELETE endpoint
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/temp-wallets/${walletId}`, {
+        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/temporary-wallets/${walletId}`, {
             method: 'DELETE'
         });
         
@@ -2110,10 +2146,99 @@ async function deleteTempWallet(walletId) {
         
         showToast('Temporary wallet deleted successfully!', 'success');
         loadTempWallets();
+        */
         
     } catch (error) {
         console.error('Error deleting temporary wallet:', error);
         showToast('Failed to delete temporary wallet', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function setWalletAsPrimary(walletId) {
+    showLoading();
+    
+    try {
+        const userId = DEMO_USER_ID;
+        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/temporary-wallets/${walletId}/primary`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to set wallet as primary');
+        }
+        
+        showToast('Wallet set as active successfully!', 'success');
+        loadTempWallets();
+        
+    } catch (error) {
+        console.error('Error setting wallet as primary:', error);
+        showToast(error.message || 'Failed to set wallet as active', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function freezeTempWallet(walletAddress) {
+    if (!confirm('Are you sure you want to freeze this wallet? This will block all outgoing transactions.')) {
+        return;
+    }
+    
+    showLoading();
+    
+    try {
+        const userId = DEMO_USER_ID;
+        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/wallets/${walletAddress}/freeze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to freeze wallet');
+        }
+        
+        showToast('Wallet frozen successfully! It will block all outgoing transactions.', 'success');
+        loadTempWallets();
+        
+    } catch (error) {
+        console.error('Error freezing wallet:', error);
+        showToast(error.message || 'Failed to freeze wallet', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function unfreezeTempWallet(walletAddress) {
+    const password = prompt('Enter your password to unfreeze this wallet:');
+    
+    if (!password) return;
+    
+    showLoading();
+    
+    try {
+        const userId = DEMO_USER_ID;
+        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/wallets/${walletAddress}/unfreeze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: password })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to unfreeze wallet');
+        }
+        
+        showToast('Wallet unfrozen successfully!', 'success');
+        loadTempWallets();
+        
+    } catch (error) {
+        console.error('Error unfreezing wallet:', error);
+        showToast(error.message || 'Failed to unfreeze wallet', 'error');
     } finally {
         hideLoading();
     }
@@ -2163,8 +2288,8 @@ function displayWalletFreezeStatus(wallets) {
             </div>
             <div class="wallet-actions">
                 ${wallet.is_frozen ?
-                    `<button class="btn btn-primary btn-sm" onclick="unfreezeWallet('${wallet.id}')">Unfreeze</button>` :
-                    `<button class="btn btn-secondary btn-sm" onclick="freezeWallet('${wallet.id}')">Freeze</button>`
+                    `<button class="btn btn-primary btn-sm" onclick="unfreezeWallet('${wallet.address}')">Unfreeze</button>` :
+                    `<button class="btn btn-secondary btn-sm" onclick="freezeWallet('${wallet.address}')">Freeze</button>`
                 }
             </div>
         `;
@@ -2187,7 +2312,7 @@ function displayMockWalletFreezeStatus() {
     displayWalletFreezeStatus(mockWallets);
 }
 
-async function freezeWallet(walletId) {
+async function freezeWallet(walletAddress) {
     if (!confirm('Are you sure you want to freeze this wallet? This will block all outgoing transactions.')) {
         return;
     }
@@ -2196,7 +2321,7 @@ async function freezeWallet(walletId) {
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/wallets/${walletId}/freeze`, {
+        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/wallets/${walletAddress}/freeze`, {
             method: 'POST'
         });
         
@@ -2213,19 +2338,19 @@ async function freezeWallet(walletId) {
     }
 }
 
-async function unfreezeWallet(walletId) {
-    const twoFACode = prompt('Enter your 2FA code to unfreeze this wallet:');
+async function unfreezeWallet(walletAddress) {
+    const password = prompt('Enter your password to unfreeze this wallet:');
     
-    if (!twoFACode) return;
+    if (!password) return;
     
     showLoading();
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/wallets/${walletId}/unfreeze`, {
+        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/wallets/${walletAddress}/unfreeze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ two_fa_code: twoFACode })
+            body: JSON.stringify({ password: password })
         });
         
         if (!response.ok) {

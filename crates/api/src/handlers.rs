@@ -1465,6 +1465,26 @@ pub async fn report_message(
     }
 }
 
+/// Get available chat contacts from proximity network
+pub async fn get_proximity_contacts(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<Vec<crate::chat_service::ProximityContact>>>, (StatusCode, Json<ApiResponse<Vec<crate::chat_service::ProximityContact>>>)> {
+    match state
+        .chat_service
+        .get_proximity_contacts(&state.proximity_discovery_service)
+        .await
+    {
+        Ok(contacts) => Ok(Json(ApiResponse::success(contacts))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(format!(
+                "Failed to get proximity contacts: {}",
+                e
+            ))),
+        )),
+    }
+}
+
 // ============================================================================
 // Position Management Handlers
 // ============================================================================
@@ -2277,11 +2297,11 @@ pub async fn create_temporary_wallet(
 ) -> Result<Json<ApiResponse<crate::TemporaryWallet>>, (StatusCode, Json<ApiResponse<crate::TemporaryWallet>>)> {
     use chrono::DateTime;
 
-    let blockchain = match req.blockchain.as_str() {
-        "Solana" => blockchain::Blockchain::Solana,
-        "Ethereum" => blockchain::Blockchain::Ethereum,
-        "BinanceSmartChain" | "BSC" => blockchain::Blockchain::BinanceSmartChain,
-        "Polygon" => blockchain::Blockchain::Polygon,
+    let blockchain = match req.blockchain.to_lowercase().as_str() {
+        "solana" => blockchain::Blockchain::Solana,
+        "ethereum" => blockchain::Blockchain::Ethereum,
+        "binancesmartchain" | "bsc" => blockchain::Blockchain::BinanceSmartChain,
+        "polygon" => blockchain::Blockchain::Polygon,
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -2374,6 +2394,23 @@ pub async fn check_wallet_frozen(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::error(format!("Failed to check wallet status: {}", e))),
         )),
+    }
+}
+
+/// Set primary temporary wallet
+pub async fn set_primary_temporary_wallet(
+    State(state): State<Arc<AppState>>,
+    Path((user_id, wallet_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<ApiResponse<String>>, (StatusCode, Json<ApiResponse<String>>)> {
+    match state.privacy_service.set_primary_wallet(user_id, wallet_id).await {
+        Ok(_) => Ok(Json(ApiResponse::success("Wallet set as primary successfully".to_string()))),
+        Err(e) => {
+            let status = match e {
+                shared::Error::WalletNotFound(_) => StatusCode::NOT_FOUND,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            Err((status, Json(ApiResponse::error(format!("Failed to set primary wallet: {}", e)))))
+        }
     }
 }
 

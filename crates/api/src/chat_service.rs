@@ -13,6 +13,18 @@ use uuid::Uuid;
 use crate::receipt_service::{ReceiptService, ReceiptData};
 use blockchain::Blockchain;
 
+/// Proximity contact structure for chat
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProximityContact {
+    pub peer_id: String,
+    pub user_tag: String,
+    pub wallet_address: String,
+    pub discovery_method: String,
+    pub signal_strength: Option<i8>,
+    pub verified: bool,
+    pub last_seen: DateTime<Utc>,
+}
+
 /// Chat message structure
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
@@ -40,6 +52,45 @@ impl ChatService {
             db,
             receipt_service,
         }
+    }
+
+    /// Get available chat contacts from proximity network
+    /// Only returns users who are currently discovered via proximity
+    pub async fn get_proximity_contacts(
+        &self,
+        discovery_service: &proximity::DiscoveryService,
+    ) -> Result<Vec<ProximityContact>> {
+        // Get discovered peers from proximity network
+        let peers = discovery_service.get_discovered_peers().await
+            .map_err(|e| Error::Internal(format!("Failed to get discovered peers: {}", e)))?;
+        
+        // Convert to contact format
+        let contacts: Vec<ProximityContact> = peers
+            .into_iter()
+            .map(|peer| ProximityContact {
+                peer_id: peer.peer_id.to_string(),
+                user_tag: peer.user_tag,
+                wallet_address: peer.wallet_address,
+                discovery_method: format!("{:?}", peer.discovery_method),
+                signal_strength: peer.signal_strength,
+                verified: peer.verified,
+                last_seen: peer.last_seen,
+            })
+            .collect();
+        
+        Ok(contacts)
+    }
+
+    /// Check if a user is in the proximity network
+    pub async fn is_user_in_proximity(
+        &self,
+        wallet_address: &str,
+        discovery_service: &proximity::DiscoveryService,
+    ) -> Result<bool> {
+        let peers = discovery_service.get_discovered_peers().await
+            .map_err(|e| Error::Internal(format!("Failed to get discovered peers: {}", e)))?;
+        
+        Ok(peers.iter().any(|p| p.wallet_address == wallet_address))
     }
 
     /// Send an encrypted message between users

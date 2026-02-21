@@ -1657,6 +1657,53 @@ body {
     font-weight: 600;
 }
 
+.primary-badge {
+    padding: 0.25rem 0.75rem;
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--success-color);
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.frozen-badge {
+    padding: 0.25rem 0.75rem;
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--warning-color);
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.btn-warning {
+    background: var(--warning-color);
+    color: white;
+}
+
+.active-wallet-info {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: rgba(16, 185, 129, 0.1);
+    border-left: 4px solid var(--success-color);
+    border-radius: 8px;
+}
+
+.info-banner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.info-banner strong {
+    color: var(--success-color);
+    font-size: 1rem;
+}
+
+.info-text {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
 .wallet-actions {
     display: flex;
     gap: 0.5rem;

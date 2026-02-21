@@ -422,7 +422,15 @@
                         <h3>Temporary Wallets</h3>
                         <button id="createTempWalletBtn" class="btn btn-primary">Create Temporary Wallet</button>
                     </div>
-                    <p class="card-description">Create temporary wallets with custom tags for compartmentalized trading (max 10)</p>
+                    <p class="card-description">Create temporary wallets with custom tags for compartmentalized trading (max 10). The active wallet is used for all exchanges, conversions, and P2P transfers.</p>
+                    
+                    <!-- Active Wallet Info -->
+                    <div id="activeWalletInfo" class="active-wallet-info hidden">
+                        <div class="info-banner">
+                            <strong>🔑 Active Wallet:</strong> <span id="activeWalletName">None</span>
+                            <span class="info-text">This wallet will be used for all trading operations</span>
+                        </div>
+                    </div>
                     
                     <!-- Create Temp Wallet Form -->
                     <div id="tempWalletForm" class="form-section hidden">
