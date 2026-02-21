@@ -3205,20 +3205,7 @@ function displayNetworkStatus(status) {
     
     let warningHtml = '';
     
-    // Check for warnings
-    if (activeProviders.length === 0) {
-        warningHtml = `
-            <div class="network-warning error">
-                <span class="warning-icon">⚠️</span>
-                <div class="warning-content">
-                    <div class="warning-title">No Live Data Sources</div>
-                    <div class="warning-message">No provider nodes are currently online. Displaying cached data.</div>
-                </div>
-            </div>
-        `;
-    }
-    
-    // Check for extended offline (10+ minutes)
+    // Only show extended offline warning (10+ minutes)
     if (status.extended_offline && status.offline_duration_minutes) {
         warningHtml = `
             <div class="network-offline-indicator">
@@ -3259,19 +3246,19 @@ function displayNetworkStatus(status) {
         <div class="network-status-grid">
             <div class="network-stat-item">
                 <span class="network-stat-label">Active Providers</span>
-                <span class="network-stat-value ${activeProviders.length > 0 ? 'success' : 'error'}">
+                <span class="network-stat-value ${activeProviders.length > 0 ? 'success' : 'neutral'}">
                     ${activeProviders.length}
                 </span>
             </div>
             <div class="network-stat-item">
                 <span class="network-stat-label">Connected Peers</span>
-                <span class="network-stat-value ${connectedPeers > 0 ? 'success' : 'warning'}">
+                <span class="network-stat-value ${connectedPeers > 0 ? 'success' : 'neutral'}">
                     ${connectedPeers}
                 </span>
             </div>
             <div class="network-stat-item">
                 <span class="network-stat-label">Network Size</span>
-                <span class="network-stat-value">
+                <span class="network-stat-value neutral">
                     ${status.total_network_size || 0}
                 </span>
             </div>
