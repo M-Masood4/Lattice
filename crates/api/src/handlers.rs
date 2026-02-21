@@ -2737,3 +2737,142 @@ pub async fn liveness_check() -> impl IntoResponse {
         "timestamp": chrono::Utc::now().to_rfc3339(),
     })))
 }
+
+// Mesh Price Service handlers
+
+/// Request to enable provider mode
+#[derive(Deserialize)]
+pub struct EnableProviderRequest {
+    pub api_key: String,
+}
+
+/// Response for provider status
+#[derive(Serialize)]
+pub struct ProviderStatusResponse {
+    pub enabled: bool,
+    pub node_id: String,
+}
+
+/// Enable provider mode with API key validation
+/// Requirements: 1.1, 1.2
+pub async fn enable_mesh_provider(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<EnableProviderRequest>,
+) -> Result<Json<ApiResponse<ProviderStatusResponse>>, (StatusCode, Json<ApiResponse<ProviderStatusResponse>>)> {
+    match state
+        .mesh_price_service
+        .enable_provider_mode(payload.api_key)
+        .await
+    {
+        Ok(_) => {
+            let node_id = state.mesh_price_service.node_id().to_string();
+            let response = ProviderStatusResponse {
+                enabled: true,
+                node_id,
+            };
+            Ok(Json(ApiResponse::success(response)))
+        }
+        Err(e) => {
+            let status = match e.to_string().as_str() {
+                s if s.contains("Invalid API key") || s.contains("validation failed") => {
+                    StatusCode::UNAUTHORIZED
+                }
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            Err((status, Json(ApiResponse::error(e.to_string()))))
+        }
+    }
+}
+
+/// Disable provider mode
+/// Requirements: 1.2, 1.5
+pub async fn disable_mesh_provider(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<ProviderStatusResponse>>, (StatusCode, Json<ApiResponse<ProviderStatusResponse>>)> {
+    match state.mesh_price_service.disable_provider_mode().await {
+        Ok(_) => {
+            let node_id = state.mesh_price_service.node_id().to_string();
+            let response = ProviderStatusResponse {
+                enabled: false,
+                node_id,
+            };
+            Ok(Json(ApiResponse::success(response)))
+        }
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(e.to_string())),
+        )),
+    }
+}
+
+/// Get current provider status
+/// Requirements: 1.4, 1.5
+pub async fn get_mesh_provider_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<ProviderStatusResponse>>, (StatusCode, Json<ApiResponse<ProviderStatusResponse>>)> {
+    let enabled = state.mesh_price_service.is_provider().await;
+    let node_id = state.mesh_price_service.node_id().to_string();
+    
+    let response = ProviderStatusResponse {
+        enabled,
+        node_id,
+    };
+    
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// Get all cached prices
+/// Requirements: 6.4
+pub async fn get_mesh_prices(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
+    match state.mesh_price_service.get_all_price_data().await {
+        Ok(prices) => {
+            let json_value = serde_json::to_value(&prices).unwrap_or_default();
+            Ok(Json(ApiResponse::success(json_value)))
+        }
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(e.to_string())),
+        )),
+    }
+}
+
+/// Get price for specific asset
+/// Requirements: 6.4
+pub async fn get_mesh_price_by_asset(
+    State(state): State<Arc<AppState>>,
+    Path(asset): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
+    match state.mesh_price_service.get_price_data(&asset).await {
+        Ok(Some(price_data)) => {
+            let json_value = serde_json::to_value(&price_data).unwrap_or_default();
+            Ok(Json(ApiResponse::success(json_value)))
+        }
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse::error(format!("Price data not found for asset: {}", asset))),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(e.to_string())),
+        )),
+    }
+}
+
+/// Get network status and topology
+/// Requirements: 8.5
+pub async fn get_mesh_network_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
+    match state.mesh_price_service.get_network_status().await {
+        Ok(status) => {
+            let json_value = serde_json::to_value(&status).unwrap_or_default();
+            Ok(Json(ApiResponse::success(json_value)))
+        }
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(e.to_string())),
+        )),
+    }
+}

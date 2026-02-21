@@ -814,6 +814,46 @@
                     <div id="trimConfigError" class="error-message"></div>
                 </div>
 
+                <!-- Mesh Network Provider Settings -->
+                <div class="card">
+                    <h3>Mesh Network Provider</h3>
+                    <p class="card-description">
+                        Enable provider mode to fetch and share price data with the mesh network. Requires a Birdeye API key.
+                    </p>
+                    
+                    <div class="provider-status-section">
+                        <div class="provider-status-indicator" id="providerStatusIndicator">
+                            <span class="status-dot"></span>
+                            <span class="status-text" id="providerStatusText">Provider Mode: Disabled</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="providerModeEnabled" class="toggle-input">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-text">Enable Provider Mode</span>
+                        </label>
+                    </div>
+
+                    <div id="providerConfigSection" class="hidden" style="margin-top: 1.5rem;">
+                        <div class="form-group">
+                            <label for="birdeyeApiKey">Birdeye API Key</label>
+                            <input 
+                                type="password" 
+                                id="birdeyeApiKey" 
+                                class="input-field"
+                                placeholder="Enter your Birdeye API key"
+                            >
+                            <small style="color: var(--text-secondary);">Your API key is used to fetch price data from Birdeye</small>
+                        </div>
+
+                        <button id="saveProviderConfig" class="btn btn-primary">Enable Provider Mode</button>
+                    </div>
+
+                    <div id="providerConfigError" class="error-message"></div>
+                </div>
+
                 <div class="card">
                     <h3>About</h3>
                     <p>Lattice v1.0.0</p>

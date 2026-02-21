@@ -106,7 +106,7 @@ struct BirdeyePriceData {
 pub struct BirdeyeService {
     client: Client,
     api_key: String,
-    redis: redis::aio::ConnectionManager,
+    pub redis: redis::aio::ConnectionManager,
     circuit_breaker: Arc<blockchain::circuit_breaker::CircuitBreaker>,
 }
 

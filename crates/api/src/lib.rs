@@ -34,6 +34,16 @@ pub mod proximity_receipt_integration;
 pub mod proximity_service;
 pub mod proximity_handlers;
 pub mod proximity_websocket;
+pub mod mesh_types;
+pub mod message_tracker;
+pub mod price_cache;
+pub mod coordination_service;
+pub mod gossip_protocol;
+pub mod provider_node;
+pub mod network_status_tracker;
+pub mod mesh_price_service;
+pub mod price_update_validator;
+pub mod mesh_metrics;
 
 pub use wallet_service::WalletService;
 pub use portfolio_cache::PortfolioCache;
@@ -70,6 +80,15 @@ pub use cross_chain_transaction_service::{
 };
 pub use proximity_receipt_integration::{create_proximity_receipt, create_receipt_service};
 pub use proximity_websocket::{ProximityWebSocketService, ProximityEvent, proximity_websocket_handler};
+pub use message_tracker::MessageTracker;
+pub use price_cache::PriceCache;
+pub use coordination_service::CoordinationService;
+pub use gossip_protocol::GossipProtocol;
+pub use provider_node::ProviderNode;
+pub use network_status_tracker::NetworkStatusTracker;
+pub use mesh_price_service::MeshPriceService;
+pub use price_update_validator::PriceUpdateValidator;
+pub use mesh_metrics::{MeshMetricsCollector, MeshMetrics, MeshMetricsSummary};
 pub use error::{ApiError, ApiResult, ErrorResponse};
 pub use monitoring::{MetricsCollector, ServiceMetrics, ServiceMetric, HealthStatus, RequestTimer, AlertManager};
 
@@ -102,6 +121,7 @@ pub struct AppState {
     pub proximity_transfer_service: Arc<TransferService>,
     pub proximity_session_manager: Arc<SessionManager>,
     pub proximity_auth_service: Arc<AuthenticationService>,
+    pub mesh_price_service: Arc<MeshPriceService>,
     pub jwt_config: Arc<auth::JwtConfig>,
     pub db_pool: Pool,
     pub redis_pool: ConnectionManager,
@@ -131,6 +151,7 @@ impl AppState {
         proximity_transfer_service: Arc<TransferService>,
         proximity_session_manager: Arc<SessionManager>,
         proximity_auth_service: Arc<AuthenticationService>,
+        mesh_price_service: Arc<MeshPriceService>,
         jwt_config: Arc<auth::JwtConfig>,
         db_pool: Pool,
         redis_pool: ConnectionManager,
@@ -158,6 +179,7 @@ impl AppState {
             proximity_transfer_service,
             proximity_session_manager,
             proximity_auth_service,
+            mesh_price_service,
             jwt_config,
             db_pool,
             redis_pool,

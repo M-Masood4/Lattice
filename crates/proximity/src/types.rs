@@ -115,4 +115,18 @@ pub enum PeerMessage {
     TransferCompleted { request_id: Uuid, tx_hash: String },
     Ping,
     Pong,
+    
+    // Mesh network price distribution messages
+    PriceUpdate {
+        message_id: Uuid,
+        source_node_id: Uuid,
+        timestamp: DateTime<Utc>,
+        prices: serde_json::Value, // HashMap<String, PriceData> serialized
+        ttl: u32,
+    },
+    NetworkStatus {
+        node_id: Uuid,
+        is_provider: bool,
+        hop_count: u32,
+    },
 }

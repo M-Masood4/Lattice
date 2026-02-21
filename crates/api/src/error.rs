@@ -54,6 +54,12 @@ pub enum ApiError {
     
     // Not implemented
     NotImplemented(String),
+    
+    // Mesh network errors
+    MeshNetworkError(String),
+    InvalidPriceUpdate(String),
+    ProviderNotConfigured(String),
+    NoProvidersAvailable(String),
 }
 
 impl fmt::Display for ApiError {
@@ -82,6 +88,10 @@ impl fmt::Display for ApiError {
             ApiError::ConfigurationError(msg) => write!(f, "Configuration error: {}", msg),
             ApiError::Timeout(msg) => write!(f, "Timeout: {}", msg),
             ApiError::NotImplemented(msg) => write!(f, "Not implemented: {}", msg),
+            ApiError::MeshNetworkError(msg) => write!(f, "Mesh network error: {}", msg),
+            ApiError::InvalidPriceUpdate(msg) => write!(f, "Invalid price update: {}", msg),
+            ApiError::ProviderNotConfigured(msg) => write!(f, "Provider not configured: {}", msg),
+            ApiError::NoProvidersAvailable(msg) => write!(f, "No providers available: {}", msg),
         }
     }
 }
@@ -168,6 +178,19 @@ impl IntoResponse for ApiError {
             }
             ApiError::NotImplemented(msg) => {
                 (StatusCode::NOT_IMPLEMENTED, "not_implemented", msg.clone())
+            }
+            ApiError::MeshNetworkError(msg) => {
+                error!("Mesh network error: {}", msg);
+                (StatusCode::INTERNAL_SERVER_ERROR, "mesh_network_error", msg.clone())
+            }
+            ApiError::InvalidPriceUpdate(msg) => {
+                (StatusCode::BAD_REQUEST, "invalid_price_update", msg.clone())
+            }
+            ApiError::ProviderNotConfigured(msg) => {
+                (StatusCode::BAD_REQUEST, "provider_not_configured", msg.clone())
+            }
+            ApiError::NoProvidersAvailable(msg) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "no_providers_available", msg.clone())
             }
         };
 

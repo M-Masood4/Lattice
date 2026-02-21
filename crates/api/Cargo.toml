@@ -88,5 +88,8 @@ async-stripe = { version = "0.35", features = ["runtime-tokio-hyper"] }
 # Environment
 dotenv = "0.15"
 
+# LRU cache
+lru = "0.12"
+
 [dev-dependencies]
 tokio-test = "0.4"

@@ -2532,3 +2532,305 @@ body {
         flex-direction: column;
     }
 }
+
+/* Mesh Network Provider Styles */
+.provider-status-section {
+    margin-bottom: 1.5rem;
+}
+
+.provider-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: var(--bg-card);
+    border-radius: 8px;
+}
+
+.provider-status-indicator .status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+}
+
+.provider-status-indicator.active .status-dot {
+    background: var(--success-color);
+    animation: pulse 2s infinite;
+}
+
+.provider-status-indicator .status-text {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Price Freshness Indicators */
+.price-freshness {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    cursor: help;
+}
+
+.freshness-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success-color);
+}
+
+.freshness-indicator.just-now {
+    background: var(--success-color);
+    animation: pulse 2s infinite;
+}
+
+.freshness-indicator.minutes-ago {
+    background: var(--primary-color);
+}
+
+.freshness-indicator.hours-ago {
+    background: var(--warning-color);
+}
+
+.freshness-indicator.stale {
+    background: var(--error-color);
+}
+
+.freshness-text {
+    font-weight: 500;
+}
+
+.freshness-warning {
+    color: var(--warning-color);
+    font-weight: 600;
+}
+
+.freshness-tooltip {
+    position: relative;
+}
+
+.freshness-tooltip .tooltip-content {
+    visibility: hidden;
+    position: absolute;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
+    z-index: 100;
+    font-size: 0.85rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.freshness-tooltip:hover .tooltip-content {
+    visibility: visible;
+}
+
+.tooltip-content::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: var(--border-color);
+}
+
+.tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.25rem;
+}
+
+.tooltip-row:last-child {
+    margin-bottom: 0;
+}
+
+.tooltip-label {
+    color: var(--text-secondary);
+}
+
+.tooltip-value {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Network Status Display */
+.network-status-card {
+    background: var(--bg-card);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.network-status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.network-status-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.network-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.network-stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: 8px;
+}
+
+.network-stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.network-stat-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--primary-color);
+}
+
+.network-stat-value.success {
+    color: var(--success-color);
+}
+
+.network-stat-value.warning {
+    color: var(--warning-color);
+}
+
+.network-stat-value.error {
+    color: var(--error-color);
+}
+
+.network-warning {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: rgba(245, 158, 11, 0.1);
+    border-left: 4px solid var(--warning-color);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.network-warning.error {
+    background: rgba(239, 68, 68, 0.1);
+    border-left-color: var(--error-color);
+}
+
+.warning-icon {
+    font-size: 1.5rem;
+}
+
+.warning-content {
+    flex: 1;
+}
+
+.warning-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.warning-message {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.network-offline-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 1.5rem;
+    background: rgba(239, 68, 68, 0.1);
+    border: 2px solid var(--error-color);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.offline-icon {
+    font-size: 2rem;
+    color: var(--error-color);
+}
+
+.offline-text {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--error-color);
+}
+
+.data-inconsistency-warning {
+    padding: 1rem;
+    background: rgba(245, 158, 11, 0.1);
+    border-left: 4px solid var(--warning-color);
+    border-radius: 8px;
+    margin-top: 1rem;
+}
+
+.inconsistency-title {
+    font-weight: 600;
+    color: var(--warning-color);
+    margin-bottom: 0.5rem;
+}
+
+.inconsistency-details {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+/* Mesh Price Display in Asset List */
+.asset-item .price-freshness {
+    margin-left: 0.5rem;
+}
+
+.asset-price-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Responsive Design for Mesh Components */
+@media (max-width: 768px) {
+    .network-status-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .network-status-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+
+    .freshness-tooltip .tooltip-content {
+        left: auto;
+        right: 0;
+        transform: none;
+    }
+
+    .tooltip-content::after {
+        left: auto;
+        right: 1rem;
+        transform: none;
+    }
+}

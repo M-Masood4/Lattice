@@ -149,6 +149,16 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/proximity/transfers/:id", get(proximity_handlers::get_transfer_status))
         .route("/api/proximity/transfers/history", get(proximity_handlers::get_transfer_history))
         
+        // Mesh Price Service - Provider Management
+        .route("/api/mesh/provider/enable", post(handlers::enable_mesh_provider))
+        .route("/api/mesh/provider/disable", post(handlers::disable_mesh_provider))
+        .route("/api/mesh/provider/status", get(handlers::get_mesh_provider_status))
+        
+        // Mesh Price Service - Price Data Access
+        .route("/api/mesh/prices", get(handlers::get_mesh_prices))
+        .route("/api/mesh/prices/:asset", get(handlers::get_mesh_price_by_asset))
+        .route("/api/mesh/network/status", get(handlers::get_mesh_network_status))
+        
         .with_state(state)
         // Serve static frontend files
         .nest_service("/", ServeDir::new("frontend"))

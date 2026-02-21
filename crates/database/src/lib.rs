@@ -63,6 +63,8 @@ pub async fn run_migrations(pool: &DbPool) -> anyhow::Result<()> {
         include_str!("../migrations/20240101000030_create_discovery_sessions_table.sql"),
         include_str!("../migrations/20240101000031_create_peer_blocklist_table.sql"),
         include_str!("../migrations/20240101000032_add_proximity_transfer_to_receipts.sql"),
+        include_str!("../migrations/20240101000037_create_mesh_price_cache_table.sql"),
+        include_str!("../migrations/20240101000038_create_mesh_seen_messages_table.sql"),
     ];
     
     for (idx, migration) in migrations.iter().enumerate() {

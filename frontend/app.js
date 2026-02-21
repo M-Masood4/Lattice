@@ -2978,3 +2978,432 @@ async function saveTrimConfiguration() {
         hideLoading();
     }
 }
+
+
+// Mesh Network Provider Functions
+
+function setupMeshNetworkListeners() {
+    document.getElementById('providerModeEnabled').addEventListener('change', toggleProviderConfigSection);
+    document.getElementById('saveProviderConfig').addEventListener('click', saveProviderConfig);
+}
+
+function toggleProviderConfigSection(e) {
+    const configSection = document.getElementById('providerConfigSection');
+    if (e.target.checked) {
+        configSection.classList.remove('hidden');
+    } else {
+        // If unchecking, disable provider mode
+        disableProviderMode();
+    }
+}
+
+async function saveProviderConfig() {
+    const apiKey = document.getElementById('birdeyeApiKey').value.trim();
+    const errorDiv = document.getElementById('providerConfigError');
+    
+    errorDiv.textContent = '';
+    
+    if (!apiKey) {
+        errorDiv.textContent = 'Please enter your Birdeye API key';
+        return;
+    }
+    
+    showLoading();
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/mesh/provider/enable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to enable provider mode');
+        }
+        
+        const data = await response.json();
+        
+        showToast('Provider mode enabled successfully!', 'success');
+        updateProviderStatus(true);
+        
+        // Clear API key from input for security
+        document.getElementById('birdeyeApiKey').value = '';
+        document.getElementById('providerConfigSection').classList.add('hidden');
+        
+    } catch (error) {
+        console.error('Error enabling provider mode:', error);
+        errorDiv.textContent = error.message || 'Failed to enable provider mode. Please check your API key.';
+        showToast('Failed to enable provider mode', 'error');
+        
+        // Uncheck the toggle
+        document.getElementById('providerModeEnabled').checked = false;
+    } finally {
+        hideLoading();
+    }
+}
+
+async function disableProviderMode() {
+    showLoading();
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/mesh/provider/disable`, {
+            method: 'POST'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to disable provider mode');
+        }
+        
+        showToast('Provider mode disabled', 'success');
+        updateProviderStatus(false);
+        document.getElementById('providerConfigSection').classList.add('hidden');
+        
+    } catch (error) {
+        console.error('Error disabling provider mode:', error);
+        showToast('Failed to disable provider mode', 'error');
+        
+        // Re-check the toggle
+        document.getElementById('providerModeEnabled').checked = true;
+    } finally {
+        hideLoading();
+    }
+}
+
+async function loadProviderStatus() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/mesh/provider/status`);
+        
+        if (!response.ok) {
+            throw new Error('Failed to load provider status');
+        }
+        
+        const data = await response.json();
+        const isEnabled = data.data.enabled;
+        
+        updateProviderStatus(isEnabled);
+        document.getElementById('providerModeEnabled').checked = isEnabled;
+        
+    } catch (error) {
+        console.error('Error loading provider status:', error);
+        updateProviderStatus(false);
+    }
+}
+
+function updateProviderStatus(isEnabled) {
+    const indicator = document.getElementById('providerStatusIndicator');
+    const statusText = document.getElementById('providerStatusText');
+    
+    if (isEnabled) {
+        indicator.classList.add('active');
+        statusText.textContent = 'Provider Mode: Active';
+    } else {
+        indicator.classList.remove('active');
+        statusText.textContent = 'Provider Mode: Disabled';
+    }
+}
+
+// Price Freshness Functions
+
+function calculateFreshness(timestamp) {
+    const now = new Date();
+    const updateTime = new Date(timestamp);
+    const diffMs = now - updateTime;
+    const diffMinutes = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    
+    if (diffMinutes < 1) {
+        return { text: 'Just now', class: 'just-now', warning: false };
+    } else if (diffMinutes < 60) {
+        return { text: `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`, class: 'minutes-ago', warning: false };
+    } else if (diffHours < 24) {
+        return { text: `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`, class: 'hours-ago', warning: diffHours >= 1 };
+    } else {
+        return { text: 'Stale data', class: 'stale', warning: true };
+    }
+}
+
+function createFreshnessIndicator(timestamp, sourceNodeId) {
+    const freshness = calculateFreshness(timestamp);
+    const formattedTime = new Date(timestamp).toLocaleString();
+    const shortNodeId = sourceNodeId ? `${sourceNodeId.substring(0, 8)}...` : 'Unknown';
+    
+    const indicator = document.createElement('span');
+    indicator.className = 'price-freshness freshness-tooltip';
+    
+    indicator.innerHTML = `
+        <span class="freshness-indicator ${freshness.class}"></span>
+        <span class="freshness-text ${freshness.warning ? 'freshness-warning' : ''}">${freshness.text}</span>
+        <div class="tooltip-content">
+            <div class="tooltip-row">
+                <span class="tooltip-label">Updated:</span>
+                <span class="tooltip-value">${formattedTime}</span>
+            </div>
+            <div class="tooltip-row">
+                <span class="tooltip-label">Source:</span>
+                <span class="tooltip-value">${shortNodeId}</span>
+            </div>
+        </div>
+    `;
+    
+    return indicator;
+}
+
+// Network Status Functions
+
+async function loadNetworkStatus() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/mesh/network/status`);
+        
+        if (!response.ok) {
+            throw new Error('Failed to load network status');
+        }
+        
+        const data = await response.json();
+        displayNetworkStatus(data.data);
+        
+    } catch (error) {
+        console.error('Error loading network status:', error);
+        displayMockNetworkStatus();
+    }
+}
+
+function displayNetworkStatus(status) {
+    // Create or update network status card in dashboard
+    let statusCard = document.getElementById('networkStatusCard');
+    
+    if (!statusCard) {
+        statusCard = document.createElement('div');
+        statusCard.id = 'networkStatusCard';
+        statusCard.className = 'card network-status-card';
+        
+        // Insert after portfolio section
+        const portfolioSection = document.getElementById('portfolioSection');
+        if (portfolioSection) {
+            portfolioSection.parentNode.insertBefore(statusCard, portfolioSection.nextSibling);
+        }
+    }
+    
+    const activeProviders = status.active_providers || [];
+    const connectedPeers = status.connected_peers || 0;
+    const lastUpdate = status.last_update_time;
+    
+    let warningHtml = '';
+    
+    // Check for warnings
+    if (activeProviders.length === 0) {
+        warningHtml = `
+            <div class="network-warning error">
+                <span class="warning-icon">⚠️</span>
+                <div class="warning-content">
+                    <div class="warning-title">No Live Data Sources</div>
+                    <div class="warning-message">No provider nodes are currently online. Displaying cached data.</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Check for extended offline (10+ minutes)
+    if (lastUpdate) {
+        const timeSinceUpdate = Date.now() - new Date(lastUpdate).getTime();
+        const minutesSinceUpdate = Math.floor(timeSinceUpdate / 60000);
+        
+        if (minutesSinceUpdate >= 10) {
+            warningHtml = `
+                <div class="network-offline-indicator">
+                    <span class="offline-icon">🔴</span>
+                    <span class="offline-text">Network Offline for ${minutesSinceUpdate} minutes</span>
+                </div>
+            `;
+        }
+    }
+    
+    statusCard.innerHTML = `
+        <div class="network-status-header">
+            <h3 class="network-status-title">Mesh Network Status</h3>
+        </div>
+        
+        ${warningHtml}
+        
+        <div class="network-status-grid">
+            <div class="network-stat-item">
+                <span class="network-stat-label">Active Providers</span>
+                <span class="network-stat-value ${activeProviders.length > 0 ? 'success' : 'error'}">
+                    ${activeProviders.length}
+                </span>
+            </div>
+            <div class="network-stat-item">
+                <span class="network-stat-label">Connected Peers</span>
+                <span class="network-stat-value ${connectedPeers > 0 ? 'success' : 'warning'}">
+                    ${connectedPeers}
+                </span>
+            </div>
+            <div class="network-stat-item">
+                <span class="network-stat-label">Network Size</span>
+                <span class="network-stat-value">
+                    ${status.total_network_size || 0}
+                </span>
+            </div>
+        </div>
+    `;
+}
+
+function displayMockNetworkStatus() {
+    displayNetworkStatus({
+        active_providers: [
+            { node_id: 'abc123', last_seen: new Date().toISOString(), hop_count: 1 },
+            { node_id: 'def456', last_seen: new Date().toISOString(), hop_count: 2 }
+        ],
+        connected_peers: 5,
+        total_network_size: 12,
+        last_update_time: new Date().toISOString(),
+        data_freshness: 'JustNow'
+    });
+}
+
+// Enhanced Portfolio Display with Mesh Prices
+
+async function loadMeshPrices() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/mesh/prices`);
+        
+        if (!response.ok) {
+            throw new Error('Failed to load mesh prices');
+        }
+        
+        const data = await response.json();
+        return data.data || {};
+        
+    } catch (error) {
+        console.error('Error loading mesh prices:', error);
+        return {};
+    }
+}
+
+function enhancePortfolioWithMeshPrices(portfolio, meshPrices) {
+    // Add freshness indicators to asset display
+    if (portfolio.positions_by_chain) {
+        Object.keys(portfolio.positions_by_chain).forEach(chain => {
+            portfolio.positions_by_chain[chain].forEach(asset => {
+                const symbol = asset.token_symbol || asset.symbol;
+                if (meshPrices[symbol]) {
+                    asset.mesh_price_data = meshPrices[symbol];
+                }
+            });
+        });
+    }
+    
+    return portfolio;
+}
+
+// Update the displayAssetsList function to include freshness indicators
+const originalDisplayAssetsList = displayAssetsList;
+displayAssetsList = async function(portfolio) {
+    // Load mesh prices
+    const meshPrices = await loadMeshPrices();
+    
+    // Enhance portfolio with mesh price data
+    const enhancedPortfolio = enhancePortfolioWithMeshPrices(portfolio, meshPrices);
+    
+    const assetsList = document.getElementById('assetsList');
+    assetsList.innerHTML = '';
+    
+    if (enhancedPortfolio.positions_by_chain) {
+        const chains = state.selectedBlockchain === 'all' 
+            ? Object.keys(enhancedPortfolio.positions_by_chain)
+            : [state.selectedBlockchain];
+        
+        let hasAssets = false;
+        
+        chains.forEach(chain => {
+            const assets = enhancedPortfolio.positions_by_chain[chain];
+            if (!assets || assets.length === 0) return;
+            
+            hasAssets = true;
+            
+            const chainHeader = document.createElement('div');
+            chainHeader.className = 'chain-header';
+            chainHeader.innerHTML = `
+                <div class="chain-name">${formatChainName(chain)}</div>
+                <div class="chain-count">${assets.length} assets</div>
+            `;
+            assetsList.appendChild(chainHeader);
+            
+            assets.forEach(asset => {
+                const assetItem = document.createElement('div');
+                assetItem.className = 'asset-item';
+                
+                const symbol = asset.token_symbol || asset.symbol;
+                const amount = parseFloat(asset.amount).toFixed(4);
+                const value = (asset.value_usd || 0).toFixed(2);
+                
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'asset-info';
+                
+                let priceInfoHtml = '';
+                if (asset.mesh_price_data) {
+                    const freshnessIndicator = createFreshnessIndicator(
+                        asset.mesh_price_data.timestamp,
+                        asset.mesh_price_data.source_node_id
+                    );
+                    priceInfoHtml = `<div class="asset-price-info">${freshnessIndicator.outerHTML}</div>`;
+                }
+                
+                infoDiv.innerHTML = `
+                    <div>
+                        <div class="asset-symbol">${symbol}</div>
+                        <div class="asset-amount">${amount}</div>
+                    </div>
+                    <div class="asset-chain-badge">${formatChainName(chain)}</div>
+                    ${priceInfoHtml}
+                `;
+                
+                const valueDiv = document.createElement('div');
+                valueDiv.className = 'asset-value';
+                valueDiv.textContent = `$${value}`;
+                
+                assetItem.appendChild(infoDiv);
+                assetItem.appendChild(valueDiv);
+                assetsList.appendChild(assetItem);
+            });
+        });
+        
+        if (!hasAssets) {
+            assetsList.innerHTML = '<p class="empty-state">No assets found for selected blockchain</p>';
+        }
+    } else if (enhancedPortfolio.assets) {
+        enhancedPortfolio.assets.forEach(asset => {
+            const assetItem = document.createElement('div');
+            assetItem.className = 'asset-item';
+            assetItem.innerHTML = `
+                <div class="asset-info">
+                    <div>
+                        <div class="asset-symbol">${asset.token_symbol}</div>
+                        <div class="asset-amount">${parseFloat(asset.amount).toFixed(4)}</div>
+                    </div>
+                </div>
+                <div class="asset-value">${(asset.value_usd || 0).toFixed(2)}</div>
+            `;
+            assetsList.appendChild(assetItem);
+        });
+    } else {
+        assetsList.innerHTML = '<p class="empty-state">No assets found</p>';
+    }
+};
+
+// Initialize mesh network features
+function initializeMeshNetwork() {
+    setupMeshNetworkListeners();
+    loadProviderStatus();
+    loadNetworkStatus();
+    
+    // Refresh network status every 30 seconds
+    setInterval(loadNetworkStatus, 30000);
+}
+
+// Update the initializeApp function to include mesh network initialization
+const originalInitializeApp = initializeApp;
+initializeApp = function() {
+    originalInitializeApp();
+    initializeMeshNetwork();
+};

@@ -75,9 +75,16 @@ impl PeerConnection {
 }
 
 /// Manages peer-to-peer connections
+/// Manages peer-to-peer connections
 pub struct PeerConnectionManager {
     connections: Arc<RwLock<HashMap<PeerId, PeerConnection>>>,
     retry_config: RetryConfig,
+    /// Optional message handler for routing incoming messages
+    message_handler: Arc<RwLock<Option<Arc<dyn Fn(PeerId, PeerMessage) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send>> + Send + Sync>>>>,
+    /// Peer routing preferences based on hop count to providers
+    routing_preferences: Arc<RwLock<HashMap<PeerId, u32>>>,
+    /// Maximum number of connections to maintain
+    max_connections: usize,
 }
 
 /// Configuration for connection retry logic
@@ -104,6 +111,9 @@ impl PeerConnectionManager {
         Self {
             connections: Arc::new(RwLock::new(HashMap::new())),
             retry_config: RetryConfig::default(),
+            message_handler: Arc::new(RwLock::new(None)),
+            routing_preferences: Arc::new(RwLock::new(HashMap::new())),
+            max_connections: 10,
         }
     }
 
@@ -112,6 +122,52 @@ impl PeerConnectionManager {
         Self {
             connections: Arc::new(RwLock::new(HashMap::new())),
             retry_config,
+            message_handler: Arc::new(RwLock::new(None)),
+            routing_preferences: Arc::new(RwLock::new(HashMap::new())),
+            max_connections: 10,
+        }
+    }
+    
+    /// Set a message handler for routing incoming messages
+    /// 
+    /// The handler will be called whenever a message is received from a peer.
+    /// This allows external services (like MeshPriceService) to process messages.
+    /// 
+    /// # Arguments
+    /// * `handler` - Async function that processes incoming messages
+    pub async fn set_message_handler<F, Fut>(&self, handler: F)
+    where
+        F: Fn(PeerId, PeerMessage) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send + 'static,
+    {
+        let mut message_handler = self.message_handler.write().await;
+        *message_handler = Some(Arc::new(move |peer_id, message| {
+            Box::pin(handler(peer_id, message))
+        }));
+    }
+    
+    /// Handle an incoming message from a peer
+    /// 
+    /// Routes the message to the registered message handler if one exists.
+    /// This method should be called when a message is received from the network.
+    /// 
+    /// # Arguments
+    /// * `peer_id` - The peer that sent the message
+    /// * `message` - The message received
+    /// 
+    /// # Returns
+    /// * `Ok(())` - Message handled successfully
+    /// * `Err(_)` - No handler registered or handler returned error
+    pub async fn handle_incoming_message(&self, peer_id: PeerId, message: PeerMessage) -> Result<()> {
+        debug!("Handling incoming message from peer {}: {:?}", peer_id, message);
+        
+        let handler = self.message_handler.read().await;
+        if let Some(handler) = handler.as_ref() {
+            handler(peer_id, message).await
+                .map_err(|e| ProximityError::InternalError(format!("Message handler error: {}", e)))
+        } else {
+            warn!("No message handler registered, message discarded");
+            Ok(())
         }
     }
 
@@ -146,7 +202,21 @@ impl PeerConnectionManager {
         }
 
         info!("Successfully established connection to peer: {}", peer_id);
+        
+        // Notify handler about new connection (for network status exchange)
+        self.on_connection_established(&peer_id).await;
+        
         Ok(connection)
+    }
+    
+    /// Called when a new connection is established
+    /// 
+    /// This allows external services to be notified of new connections
+    /// and perform initialization like network status exchange.
+    async fn on_connection_established(&self, peer_id: &PeerId) {
+        debug!("Connection established to peer: {}", peer_id);
+        // Handler can listen for this via message handler
+        // Network status exchange will be initiated by the application layer
     }
 
     /// Internal method to establish connection with exponential backoff retry
@@ -264,11 +334,25 @@ impl PeerConnectionManager {
         let mut connections = self.connections.write().await;
         if connections.remove(&peer_id).is_some() {
             debug!("Connection to peer {} closed", peer_id);
+            drop(connections); // Release lock before notification
+            
+            // Notify about disconnection
+            self.on_connection_closed(&peer_id).await;
+            
             Ok(())
         } else {
             warn!("Attempted to close non-existent connection to peer {}", peer_id);
             Err(ProximityError::PeerNotFound(peer_id))
         }
+    }
+    
+    /// Called when a connection is closed
+    /// 
+    /// This allows external services to be notified of disconnections
+    /// and update their state accordingly.
+    async fn on_connection_closed(&self, peer_id: &PeerId) {
+        debug!("Connection closed to peer: {}", peer_id);
+        // Handler can listen for this via message handler or separate callback
     }
 
     /// Measure connection quality for a peer
@@ -463,6 +547,178 @@ impl PeerConnectionManager {
     pub async fn get_connection(&self, peer_id: &PeerId) -> Option<ConnectionQuality> {
         let connections = self.connections.read().await;
         connections.get(peer_id).map(|c| c.quality.clone())
+    }
+    
+    /// Update routing preference for a peer based on hop count to providers
+    /// 
+    /// Lower hop counts are preferred for routing. This allows the network
+    /// to maintain connections on shortest paths to provider nodes.
+    /// 
+    /// Requirement: 13.1, 13.2
+    /// 
+    /// # Arguments
+    /// * `peer_id` - The peer to update routing preference for
+    /// * `hop_count` - Number of hops to nearest provider through this peer
+    pub async fn update_routing_preference(&self, peer_id: PeerId, hop_count: u32) {
+        debug!("Updating routing preference for peer {}: hop_count={}", peer_id, hop_count);
+        
+        let mut preferences = self.routing_preferences.write().await;
+        preferences.insert(peer_id, hop_count);
+    }
+    
+    /// Get routing preference (hop count) for a peer
+    /// 
+    /// # Arguments
+    /// * `peer_id` - The peer to get routing preference for
+    /// 
+    /// # Returns
+    /// The hop count to nearest provider through this peer, or None if not set
+    pub async fn get_routing_preference(&self, peer_id: &PeerId) -> Option<u32> {
+        let preferences = self.routing_preferences.read().await;
+        preferences.get(peer_id).copied()
+    }
+    
+    /// Get peers sorted by routing preference (lowest hop count first)
+    /// 
+    /// Returns active connections sorted by their hop count to providers.
+    /// This allows selecting the best peers for message routing.
+    /// 
+    /// Requirement: 13.1, 13.3
+    /// 
+    /// # Returns
+    /// Vector of (peer_id, hop_count) tuples sorted by hop count
+    pub async fn get_peers_by_preference(&self) -> Vec<(PeerId, u32)> {
+        let connections = self.connections.read().await;
+        let preferences = self.routing_preferences.read().await;
+        
+        let mut peers: Vec<(PeerId, u32)> = connections
+            .keys()
+            .filter_map(|peer_id| {
+                preferences.get(peer_id).map(|&hop_count| (peer_id.clone(), hop_count))
+            })
+            .collect();
+        
+        // Sort by hop count (ascending)
+        peers.sort_by_key(|(_, hop_count)| *hop_count);
+        
+        peers
+    }
+    
+    /// Check if we should accept a new connection based on connection limits
+    /// 
+    /// Enforces the maximum connection limit. If at capacity, determines
+    /// whether the new peer should replace an existing one based on routing preference.
+    /// 
+    /// Requirement: 13.5
+    /// 
+    /// # Arguments
+    /// * `new_peer_hop_count` - Hop count for the potential new peer
+    /// 
+    /// # Returns
+    /// * `Ok(None)` - Can accept new connection without dropping any
+    /// * `Ok(Some(peer_id))` - Should drop this peer to make room for new one
+    /// * `Err(_)` - Should not accept new connection
+    pub async fn should_accept_connection(&self, new_peer_hop_count: u32) -> Result<Option<PeerId>> {
+        let connections = self.connections.read().await;
+        let connection_count = connections.len();
+        
+        if connection_count < self.max_connections {
+            // Have room for more connections
+            return Ok(None);
+        }
+        
+        // At capacity, check if new peer is better than worst existing peer
+        let preferences = self.routing_preferences.read().await;
+        
+        // Find peer with highest hop count (worst routing preference)
+        let worst_peer = connections
+            .keys()
+            .filter_map(|peer_id| {
+                preferences.get(peer_id).map(|&hop_count| (peer_id.clone(), hop_count))
+            })
+            .max_by_key(|(_, hop_count)| *hop_count);
+        
+        if let Some((worst_peer_id, worst_hop_count)) = worst_peer {
+            if new_peer_hop_count < worst_hop_count {
+                // New peer is better, should replace worst peer
+                debug!(
+                    "At connection limit, new peer (hop={}) is better than worst peer {} (hop={})",
+                    new_peer_hop_count, worst_peer_id, worst_hop_count
+                );
+                return Ok(Some(worst_peer_id));
+            }
+        }
+        
+        // New peer is not better than any existing peer
+        Err(ProximityError::ConnectionFailed(
+            "At maximum connection limit and new peer does not improve routing".to_string()
+        ))
+    }
+    
+    /// Optimize connections based on routing preferences
+    /// 
+    /// Evaluates current connections and drops peers with poor routing
+    /// preferences if better alternatives are available. This maintains
+    /// connections on shortest paths to providers.
+    /// 
+    /// Requirement: 13.2, 13.3, 13.4
+    /// 
+    /// # Returns
+    /// Number of connections dropped during optimization
+    pub async fn optimize_connections(&self) -> Result<usize> {
+        debug!("Optimizing connections based on routing preferences");
+        
+        let connections = self.connections.read().await;
+        let preferences = self.routing_preferences.read().await;
+        
+        // If under capacity, no need to optimize
+        if connections.len() < self.max_connections {
+            return Ok(0);
+        }
+        
+        // Find peers with highest hop counts
+        let mut peers_by_hop: Vec<(PeerId, u32)> = connections
+            .keys()
+            .filter_map(|peer_id| {
+                preferences.get(peer_id).map(|&hop_count| (peer_id.clone(), hop_count))
+            })
+            .collect();
+        
+        peers_by_hop.sort_by_key(|(_, hop_count)| std::cmp::Reverse(*hop_count));
+        
+        drop(connections);
+        drop(preferences);
+        
+        // Drop connections with poor routing (high hop counts)
+        // Keep at least 3 connections for network resilience
+        let min_connections = 3;
+        let mut dropped = 0;
+        
+        for (peer_id, hop_count) in peers_by_hop {
+            let current_count = self.get_active_connections().await.len();
+            
+            if current_count <= min_connections {
+                break;
+            }
+            
+            // Drop peers with hop count > 5 (too far from providers)
+            if hop_count > 5 {
+                debug!("Dropping peer {} with high hop count: {}", peer_id, hop_count);
+                if let Err(e) = self.close_connection(peer_id).await {
+                    warn!("Failed to close connection during optimization: {}", e);
+                } else {
+                    dropped += 1;
+                }
+            }
+        }
+        
+        debug!("Connection optimization complete, dropped {} connections", dropped);
+        Ok(dropped)
+    }
+    
+    /// Get the maximum number of connections allowed
+    pub fn max_connections(&self) -> usize {
+        self.max_connections
     }
 }
 

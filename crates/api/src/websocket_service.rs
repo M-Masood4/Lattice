@@ -71,6 +71,16 @@ pub enum DashboardUpdate {
         to_amount: String,
         timestamp: i64,
     },
+    /// Price update from mesh network
+    PriceMeshUpdate {
+        asset: String,
+        blockchain: String,
+        price: String,
+        change_24h: Option<String>,
+        timestamp: i64,
+        source_node_id: String,
+        freshness: String,
+    },
 }
 
 /// WebSocket service for managing real-time dashboard updates
@@ -216,6 +226,37 @@ impl WebSocketService {
             warn!("Failed to broadcast conversion completion: {}", e);
         }
     }
+
+    /// Broadcast a mesh network price update to all connected clients
+    /// 
+    /// This method is used by the gossip protocol to push price updates
+    /// received from the mesh network to WebSocket clients.
+    /// 
+    /// Requirements: 12.1
+    pub fn broadcast_mesh_price_update(
+        &self,
+        asset: String,
+        blockchain: String,
+        price: String,
+        change_24h: Option<String>,
+        timestamp: chrono::DateTime<chrono::Utc>,
+        source_node_id: Uuid,
+        freshness: String,
+    ) {
+        let update = DashboardUpdate::PriceMeshUpdate {
+            asset,
+            blockchain,
+            price,
+            change_24h,
+            timestamp: timestamp.timestamp(),
+            source_node_id: source_node_id.to_string(),
+            freshness,
+        };
+        
+        if let Err(e) = self.tx.send(update) {
+            warn!("Failed to broadcast mesh price update: {}", e);
+        }
+    }
 }
 
 impl Default for WebSocketService {
@@ -233,6 +274,9 @@ pub async fn websocket_handler(
 }
 
 /// Handle an individual WebSocket connection
+/// 
+/// Requirements: 12.2 - Send initial cached data on WebSocket connection
+/// Requirements: 12.4 - Send only changed assets in updates (delta updates)
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
     
@@ -241,19 +285,63 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     
     info!("New WebSocket connection established");
     
+    // Track last sent prices for delta updates (Requirement 12.4)
+    let mut last_sent_prices: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    
+    // Send initial cached mesh price data if available
+    // Note: This will be fully integrated when mesh_price_service is added to AppState
+    // For now, we prepare the infrastructure for sending initial data
+    
     // Spawn a task to send updates to the client
     let mut send_task = tokio::spawn(async move {
+        // TODO: When mesh_price_service is added to AppState, send initial cached data here:
+        // if let Ok(cached_prices) = state.mesh_price_service.get_all_price_data().await {
+        //     for (asset, data) in cached_prices {
+        //         let freshness = DataFreshness::from_timestamp(data.timestamp);
+        //         let freshness_str = match freshness { ... };
+        //         let initial_update = DashboardUpdate::PriceMeshUpdate { ... };
+        //         if let Ok(json) = serde_json::to_string(&initial_update) {
+        //             let _ = sender.send(Message::Text(json)).await;
+        //         }
+        //         // Track initial prices for delta updates
+        //         last_sent_prices.insert(asset, data.price);
+        //     }
+        // }
+        
         while let Ok(update) = rx.recv().await {
-            // Serialize the update to JSON
-            match serde_json::to_string(&update) {
-                Ok(json) => {
-                    if sender.send(Message::Text(json)).await.is_err() {
-                        // Client disconnected
-                        break;
+            // For mesh price updates, check if the price has changed (delta update)
+            let should_send = match &update {
+                DashboardUpdate::PriceMeshUpdate { asset, price, .. } => {
+                    // Check if price has changed since last send
+                    let has_changed = last_sent_prices.get(asset)
+                        .map(|last_price| last_price != price)
+                        .unwrap_or(true); // Send if we haven't sent this asset before
+                    
+                    if has_changed {
+                        // Update tracking
+                        last_sent_prices.insert(asset.clone(), price.clone());
+                        true
+                    } else {
+                        // Price hasn't changed, skip sending
+                        false
                     }
                 }
-                Err(e) => {
-                    error!("Failed to serialize dashboard update: {}", e);
+                // For non-mesh updates, always send
+                _ => true,
+            };
+            
+            if should_send {
+                // Serialize the update to JSON
+                match serde_json::to_string(&update) {
+                    Ok(json) => {
+                        if sender.send(Message::Text(json)).await.is_err() {
+                            // Client disconnected
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to serialize dashboard update: {}", e);
+                    }
                 }
             }
         }

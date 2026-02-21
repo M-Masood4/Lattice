@@ -1,5 +1,5 @@
 use anyhow::Result;
-use api::{AnalyticsService, AppState, BenchmarkService, BirdeyeService, ChatService, ConversionService, P2PService, PaymentReceiptService, PortfolioMonitor, PositionEvaluator, PositionManagementService, PriceMonitor, PrivacyService, ReceiptService, SideShiftClient, StakingService, TrimConfigService, TrimExecutor, VerificationService, WalletService, WebSocketService, WhaleDetectionService};
+use api::{AnalyticsService, AppState, BenchmarkService, BirdeyeService, ChatService, ConversionService, MeshPriceService, P2PService, PaymentReceiptService, PortfolioMonitor, PositionEvaluator, PositionManagementService, PriceMonitor, PrivacyService, ReceiptService, SideShiftClient, StakingService, TrimConfigService, TrimExecutor, VerificationService, WalletService, WebSocketService, WhaleDetectionService};
 use blockchain::SolanaClient;
 use database::{create_pool, create_redis_client, create_redis_pool, run_migrations};
 use notification::NotificationService;
@@ -249,6 +249,18 @@ async fn main() -> Result<()> {
     ));
     tracing::info!("Proximity transfer service initialized");
 
+    // Initialize mesh price service for P2P price data distribution
+    // Uses the proximity P2P connection infrastructure for message routing
+    let peer_connection_manager = Arc::new(proximity::PeerConnectionManager::new());
+    let mesh_price_service = Arc::new(MeshPriceService::new(
+        birdeye_service.clone(),
+        peer_connection_manager,
+        redis_pool.clone(),
+        db_pool.clone(),
+        websocket_service.clone(),
+    ));
+    tracing::info!("Mesh price service initialized");
+
     // Create application state
     let app_state = Arc::new(AppState::new(
         wallet_service,
@@ -271,6 +283,7 @@ async fn main() -> Result<()> {
         proximity_transfer_service,
         proximity_session_manager,
         proximity_auth_service,
+        mesh_price_service,
         jwt_config,
         db_pool,
         redis_pool,
