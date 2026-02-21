@@ -105,3 +105,117 @@ fn test_encryption_decryption() {
     // This is a placeholder to show we have encryption tests
     assert_eq!(original.len(), 14);
 }
+
+#[tokio::test]
+#[ignore] // Requires database
+async fn test_create_conversation_from_offer() {
+    use api::{P2PService, OfferType};
+    use rust_decimal::Decimal;
+    
+    let (chat_service, db) = create_test_service().await;
+    let p2p_service = P2PService::new(db.clone());
+    
+    let creator = create_test_user(&db).await;
+    let acceptor = create_test_user(&db).await;
+    
+    // Create an offer
+    let offer = p2p_service
+        .create_offer(
+            creator,
+            OfferType::Sell,
+            "SOL".to_string(),
+            "USDC".to_string(),
+            Decimal::new(10, 0),
+            Decimal::new(1000, 0),
+            Decimal::new(100, 0),
+            false,
+        )
+        .await
+        .expect("Failed to create offer");
+    
+    // Create conversation from offer
+    let result = chat_service
+        .create_conversation_from_offer(offer.id, creator, acceptor)
+        .await;
+    
+    assert!(result.is_ok(), "Failed to create conversation from offer");
+    let conversation_id = result.unwrap();
+    
+    // Verify conversation was created
+    let client = db.get().await.expect("Failed to get db connection");
+    let row = client
+        .query_one(
+            "SELECT id, offer_id FROM chat_conversations WHERE id = $1",
+            &[&conversation_id],
+        )
+        .await
+        .expect("Failed to query conversation");
+    
+    let stored_offer_id: Uuid = row.get("offer_id");
+    assert_eq!(stored_offer_id, offer.id);
+    
+    // Verify both participants were added
+    let participants = client
+        .query(
+            "SELECT user_id FROM chat_participants WHERE conversation_id = $1",
+            &[&conversation_id],
+        )
+        .await
+        .expect("Failed to query participants");
+    
+    assert_eq!(participants.len(), 2);
+    let participant_ids: Vec<Uuid> = participants.iter().map(|r| r.get("user_id")).collect();
+    assert!(participant_ids.contains(&creator));
+    assert!(participant_ids.contains(&acceptor));
+    
+    // Verify offer was updated with conversation_id
+    let offer_row = client
+        .query_one(
+            "SELECT conversation_id FROM p2p_offers WHERE id = $1",
+            &[&offer.id],
+        )
+        .await
+        .expect("Failed to query offer");
+    
+    let stored_conversation_id: Option<Uuid> = offer_row.get("conversation_id");
+    assert_eq!(stored_conversation_id, Some(conversation_id));
+}
+
+#[tokio::test]
+#[ignore] // Requires database
+async fn test_send_offer_notification() {
+    let (service, db) = create_test_service().await;
+    
+    let creator = create_test_user(&db).await;
+    let acceptor = create_test_user(&db).await;
+    let offer_id = Uuid::new_v4();
+    
+    // Send notification
+    let result = service
+        .send_offer_notification(
+            creator,
+            acceptor,
+            offer_id,
+            "Your offer has been accepted!".to_string(),
+        )
+        .await;
+    
+    assert!(result.is_ok(), "Failed to send notification");
+    
+    // Verify notification was stored as a message
+    let client = db.get().await.expect("Failed to get db connection");
+    let messages = client
+        .query(
+            "SELECT content, encrypted FROM chat_messages WHERE from_user_id = $1 AND to_user_id = $2",
+            &[&acceptor, &creator],
+        )
+        .await
+        .expect("Failed to query messages");
+    
+    assert_eq!(messages.len(), 1);
+    let content: String = messages[0].get("content");
+    let encrypted: bool = messages[0].get("encrypted");
+    
+    assert_eq!(content, "Your offer has been accepted!");
+    assert_eq!(encrypted, false); // Notifications are not encrypted
+}

@@ -109,6 +109,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/chat/:user_id/messages/:message_id/read", post(handlers::mark_message_read))
         .route("/api/chat/messages/:message_id/verify", get(handlers::verify_message))
         .route("/api/chat/:user_id/messages/:message_id/report", post(handlers::report_message))
+        .route("/api/chat/conversations/from-offer", post(handlers::create_conversation_from_offer))
         
         // P2P Exchange
         .route("/api/p2p/:user_id/offers", get(handlers::get_user_offers))
@@ -116,6 +117,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/p2p/offers", get(handlers::get_all_offers))
         .route("/api/p2p/offers/:offer_id", get(handlers::get_offer))
         .route("/api/p2p/:user_id/offers/:offer_id/cancel", post(handlers::cancel_p2p_offer))
+        .route("/api/p2p/:user_id/offers/:offer_id/accept", post(handlers::accept_p2p_offer))
+        .route("/api/p2p/:user_id/offers/:offer_id/status", get(handlers::get_p2p_offer_status))
+        .route("/api/p2p/:user_id/marketplace", get(handlers::get_marketplace_offers))
         .route("/api/p2p/:user_id/exchanges", get(handlers::get_user_exchanges))
         
         // Verification

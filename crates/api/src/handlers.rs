@@ -1485,6 +1485,41 @@ pub async fn get_proximity_contacts(
     }
 }
 
+#[derive(Deserialize)]
+pub struct CreateConversationFromOfferRequest {
+    pub offer_id: Uuid,
+    pub creator_id: Uuid,
+    pub acceptor_id: Uuid,
+}
+
+#[derive(Serialize)]
+pub struct ConversationResponse {
+    pub conversation_id: Uuid,
+}
+
+/// Create a chat conversation from a P2P offer
+pub async fn create_conversation_from_offer(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateConversationFromOfferRequest>,
+) -> Result<Json<ApiResponse<ConversationResponse>>, (StatusCode, Json<ApiResponse<ConversationResponse>>)> {
+    match state
+        .chat_service
+        .create_conversation_from_offer(req.offer_id, req.creator_id, req.acceptor_id)
+        .await
+    {
+        Ok(conversation_id) => Ok(Json(ApiResponse::success(ConversationResponse {
+            conversation_id,
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(format!(
+                "Failed to create conversation from offer: {}",
+                e
+            ))),
+        )),
+    }
+}
+
 // ============================================================================
 // Position Management Handlers
 // ============================================================================
@@ -1945,6 +1980,25 @@ pub struct CreateP2POfferRequest {
     pub price: String,
 }
 
+#[derive(Serialize)]
+pub struct OfferStatusResponse {
+    pub offer_id: Uuid,
+    pub status: String,
+    pub creator_id: Uuid,
+    pub acceptor_id: Option<Uuid>,
+    pub acceptor_wallet: Option<String>,
+    pub acceptor_user_tag: Option<String>,
+    pub accepted_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub conversation_id: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub from_asset: String,
+    pub to_asset: String,
+    pub from_amount: String,
+    pub to_amount: String,
+    pub offer_type: String,
+}
+
 /// Create a P2P offer
 pub async fn create_p2p_offer(
     State(state): State<Arc<AppState>>,
@@ -2049,6 +2103,28 @@ pub async fn get_all_offers(
     }
 }
 
+/// Get marketplace offers (excludes user's own offers)
+pub async fn get_marketplace_offers(
+    State(state): State<Arc<AppState>>,
+    Path(user_id): Path<Uuid>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<ApiResponse<Vec<crate::P2POffer>>>, (StatusCode, Json<ApiResponse<Vec<crate::P2POffer>>>)> {
+    let from_asset = params.get("from_asset").cloned();
+    let to_asset = params.get("to_asset").cloned();
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(50);
+    
+    match state.p2p_service.get_marketplace_offers(user_id, from_asset, to_asset, limit).await {
+        Ok(offers) => Ok(Json(ApiResponse::success(offers))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(format!("Failed to get marketplace offers: {}", e))),
+        )),
+    }
+}
+
 /// Get a specific offer
 pub async fn get_offer(
     State(state): State<Arc<AppState>>,
@@ -2119,11 +2195,126 @@ pub async fn get_offer(
         escrow_tx_hash: row.get(9),
         matched_with_offer_id: row.get(10),
         is_proximity_offer: row.get(11),
+        acceptor_id: None,
+        accepted_at: None,
+        conversation_id: None,
         created_at: row.get(12),
         expires_at: row.get(13),
     };
 
     Ok(Json(ApiResponse::success(offer)))
+}
+
+/// Accept a P2P offer
+pub async fn accept_p2p_offer(
+    State(state): State<Arc<AppState>>,
+    Path((user_id, offer_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<ApiResponse<crate::P2POffer>>, (StatusCode, Json<ApiResponse<crate::P2POffer>>)> {
+    match state.p2p_service.accept_offer(offer_id, user_id, &state.chat_service).await {
+        Ok(offer) => Ok(Json(ApiResponse::success(offer))),
+        Err(e) => {
+            let error_msg = e.to_string();
+            let status_code = if error_msg.contains("Cannot accept your own offer") {
+                StatusCode::BAD_REQUEST
+            } else if error_msg.contains("not available") || error_msg.contains("not in ACTIVE status") {
+                StatusCode::BAD_REQUEST
+            } else if error_msg.contains("expired") {
+                StatusCode::BAD_REQUEST
+            } else if error_msg.contains("already been accepted") {
+                StatusCode::CONFLICT
+            } else if error_msg.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            
+            Err((
+                status_code,
+                Json(ApiResponse::error(format!("Failed to accept offer: {}", e))),
+            ))
+        }
+    }
+}
+
+/// Get P2P offer status with acceptor details
+pub async fn get_p2p_offer_status(
+    State(state): State<Arc<AppState>>,
+    Path((_user_id, offer_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<ApiResponse<OfferStatusResponse>>, (StatusCode, Json<ApiResponse<OfferStatusResponse>>)> {
+    match state.p2p_service.get_offer(offer_id).await {
+        Ok(offer) => {
+            // Fetch acceptor details if offer is accepted
+            let (acceptor_wallet, acceptor_user_tag) = if let Some(acceptor_id) = offer.acceptor_id {
+                // Try to get acceptor's wallet and user tag
+                let wallet = state.db_pool.get()
+                    .await
+                    .ok()
+                    .and_then(|client| {
+                        tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
+                                client.query_opt(
+                                    "SELECT address FROM wallets WHERE user_id = $1 LIMIT 1",
+                                    &[&acceptor_id]
+                                ).await.ok().flatten()
+                            })
+                        })
+                    })
+                    .and_then(|row| row.get::<_, Option<String>>(0));
+                
+                let user_tag = state.db_pool.get()
+                    .await
+                    .ok()
+                    .and_then(|client| {
+                        tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
+                                client.query_opt(
+                                    "SELECT user_tag FROM users WHERE id = $1",
+                                    &[&acceptor_id]
+                                ).await.ok().flatten()
+                            })
+                        })
+                    })
+                    .and_then(|row| row.get::<_, Option<String>>(0));
+                
+                (wallet, user_tag)
+            } else {
+                (None, None)
+            };
+
+            let response = OfferStatusResponse {
+                offer_id: offer.id,
+                status: offer.status.as_str().to_string(),
+                creator_id: offer.user_id,
+                acceptor_id: offer.acceptor_id,
+                acceptor_wallet,
+                acceptor_user_tag,
+                accepted_at: offer.accepted_at,
+                conversation_id: offer.conversation_id,
+                created_at: offer.created_at,
+                expires_at: offer.expires_at,
+                from_asset: offer.from_asset,
+                to_asset: offer.to_asset,
+                from_amount: offer.from_amount.to_string(),
+                to_amount: offer.to_amount.to_string(),
+                offer_type: offer.offer_type.as_str().to_string(),
+            };
+
+            Ok(Json(ApiResponse::success(response)))
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            let status_code = if error_msg.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            
+            Err((
+                status_code,
+                Json(ApiResponse::error(format!("Failed to get offer status: {}", e))),
+            ))
+        }
+    }
 }
 
 /// Cancel a P2P offer

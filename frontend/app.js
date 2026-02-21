@@ -1455,7 +1455,8 @@ async function saveOffer() {
             to_asset: toAsset,
             from_amount: fromAmount.toString(),
             to_amount: toAmount.toString(),
-            price: price.toString()
+            price: price.toString(),
+            is_proximity_offer: false
         };
         
         const response = await fetch(`${API_BASE_URL}/api/p2p/${userId}/offers`, {
@@ -1499,7 +1500,7 @@ async function loadMyOffers() {
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/p2p/${userId}/my-offers`);
+        const response = await fetch(`${API_BASE_URL}/api/p2p/${userId}/offers`);
         
         if (!response.ok) throw new Error('Failed to load offers');
         
@@ -1514,7 +1515,8 @@ async function loadMyOffers() {
 
 async function loadMarketplace() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/p2p/marketplace`);
+        const userId = DEMO_USER_ID;
+        const response = await fetch(`${API_BASE_URL}/api/p2p/${userId}/marketplace`);
         
         if (!response.ok) throw new Error('Failed to load marketplace');
         
@@ -1530,13 +1532,19 @@ async function loadMarketplace() {
 function displayMyOffers(offers) {
     const container = document.getElementById('myOffersList');
     
-    if (offers.length === 0) {
+    // Filter out cancelled offers for cleaner display
+    const activeOffers = offers.filter(offer => 
+        offer.status.toLowerCase() !== 'cancelled' && 
+        offer.status.toLowerCase() !== 'expired'
+    );
+    
+    if (activeOffers.length === 0) {
         container.innerHTML = '<p class="empty-state">No active offers</p>';
         return;
     }
     
     container.innerHTML = '';
-    offers.forEach(offer => {
+    activeOffers.forEach(offer => {
         const item = createOfferElement(offer, true);
         container.appendChild(item);
     });
@@ -1552,17 +1560,27 @@ function displayMarketplace(offers) {
     
     container.innerHTML = '';
     offers.forEach(offer => {
-        const item = createOfferElement(offer, false);
+        const item = createMarketplaceOfferElement(offer);
         container.appendChild(item);
     });
 }
 
-function createOfferElement(offer, isMyOffer) {
+function createMarketplaceOfferElement(offer) {
     const item = document.createElement('div');
     item.className = 'offer-item';
     
     const price = (parseFloat(offer.to_amount) / parseFloat(offer.from_amount)).toFixed(6);
     const statusClass = offer.status === 'active' ? 'active' : offer.status;
+    
+    // Format timestamps
+    const createdAt = offer.created_at ? new Date(offer.created_at).toLocaleString() : 'N/A';
+    const expiresAt = offer.expires_at ? new Date(offer.expires_at).toLocaleString() : 'N/A';
+    
+    // Format creator information
+    const creatorInfo = offer.user_id || 'Unknown';
+    const creatorDisplay = typeof creatorInfo === 'string' && creatorInfo.length > 16 
+        ? `${creatorInfo.substring(0, 8)}...${creatorInfo.substring(creatorInfo.length - 8)}`
+        : creatorInfo;
     
     item.innerHTML = `
         <div class="offer-info">
@@ -1577,13 +1595,80 @@ function createOfferElement(offer, isMyOffer) {
                     ${parseFloat(offer.to_amount).toFixed(4)} ${offer.to_asset}
                 </div>
                 <div class="offer-price">Price: ${price} ${offer.to_asset}/${offer.from_asset}</div>
+                <div class="offer-creator" style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
+                    Creator: ${creatorDisplay}
+                </div>
+                <div class="offer-timestamps" style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.25rem;">
+                    <div>Created: ${createdAt}</div>
+                    <div>Expires: ${expiresAt}</div>
+                </div>
             </div>
         </div>
         <div class="offer-actions">
-            ${isMyOffer ? 
-                `<button class="btn btn-secondary btn-sm" onclick="cancelOffer('${offer.id}')">Cancel</button>` :
-                `<button class="btn btn-primary btn-sm" onclick="acceptOffer('${offer.id}')">Accept</button>`
-            }
+            <button class="btn btn-primary btn-sm" onclick="acceptOffer('${offer.id}')">Accept</button>
+        </div>
+    `;
+    
+    return item;
+}
+
+function createOfferElement(offer, isMyOffer) {
+    const item = document.createElement('div');
+    item.className = 'offer-item';
+    
+    const price = (parseFloat(offer.to_amount) / parseFloat(offer.from_amount)).toFixed(6);
+    const statusClass = offer.status === 'active' ? 'active' : offer.status.toLowerCase();
+    
+    // Format acceptor information if offer is accepted
+    let acceptorInfo = '';
+    if (isMyOffer && offer.acceptor_id && offer.status.toLowerCase() === 'matched') {
+        const acceptorDisplay = offer.acceptor_wallet || offer.acceptor_user_tag || offer.acceptor_id;
+        const acceptorShort = typeof acceptorDisplay === 'string' && acceptorDisplay.length > 16 
+            ? `${acceptorDisplay.substring(0, 8)}...${acceptorDisplay.substring(acceptorDisplay.length - 8)}`
+            : acceptorDisplay;
+        
+        const acceptedAt = offer.accepted_at ? new Date(offer.accepted_at).toLocaleString() : 'N/A';
+        
+        acceptorInfo = `
+            <div class="offer-acceptor" style="color: var(--success-color); font-size: 0.9rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
+                <div><strong>Accepted by:</strong> ${acceptorShort}</div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.25rem;">
+                    Accepted: ${acceptedAt}
+                </div>
+            </div>
+        `;
+    }
+    
+    // Determine action buttons
+    let actionButtons = '';
+    if (isMyOffer) {
+        if (offer.status.toLowerCase() === 'active') {
+            actionButtons = `<button class="btn btn-secondary btn-sm" onclick="cancelOffer('${offer.id}')">Cancel</button>`;
+        } else if (offer.status.toLowerCase() === 'matched' && offer.conversation_id) {
+            actionButtons = `<button class="btn btn-primary btn-sm" onclick="contactTrader('${offer.conversation_id}', '${offer.acceptor_id || ''}')">Contact ${offer.offer_type === 'buy' ? 'Seller' : 'Buyer'}</button>`;
+        }
+    } else {
+        actionButtons = `<button class="btn btn-primary btn-sm" onclick="acceptOffer('${offer.id}')">Accept</button>`;
+    }
+    
+    item.innerHTML = `
+        <div class="offer-info">
+            <div class="offer-header">
+                <span class="offer-type ${offer.offer_type}">${offer.offer_type.toUpperCase()}</span>
+                <span class="offer-status ${statusClass}">${offer.status.toUpperCase()}</span>
+            </div>
+            <div class="offer-details">
+                <div class="offer-assets">${offer.from_asset} → ${offer.to_asset}</div>
+                <div class="offer-amounts">
+                    ${parseFloat(offer.from_amount).toFixed(4)} ${offer.from_asset} for 
+                    ${parseFloat(offer.to_amount).toFixed(4)} ${offer.to_asset}
+                </div>
+                <div class="offer-price">Price: ${price} ${offer.to_asset}/${offer.from_asset}</div>
+                ${acceptorInfo}
+            </div>
+        </div>
+        <div class="offer-actions">
+            ${actionButtons}
         </div>
     `;
     
@@ -1596,18 +1681,21 @@ async function cancelOffer(offerId) {
     showLoading();
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/p2p/${userId}/offers/${offerId}`, {
-            method: 'DELETE'
+        const response = await fetch(`${API_BASE_URL}/api/p2p/${userId}/offers/${offerId}/cancel`, {
+            method: 'POST'
         });
         
-        if (!response.ok) throw new Error('Failed to cancel offer');
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to cancel offer');
+        }
         
         showToast('Offer cancelled successfully!', 'success');
-        loadMyOffers();
-        loadMarketplace();
+        await loadMyOffers();
+        await loadMarketplace();
     } catch (error) {
         console.error('Error cancelling offer:', error);
-        showToast('Failed to cancel offer', 'error');
+        showToast(error.message || 'Failed to cancel offer', 'error');
     } finally {
         hideLoading();
     }
@@ -1623,15 +1711,77 @@ async function acceptOffer(offerId) {
             method: 'POST'
         });
         
-        if (!response.ok) throw new Error('Failed to accept offer');
+        if (!response.ok) {
+            const errorData = await response.json();
+            const errorMessage = errorData.error || 'Failed to accept offer';
+            throw new Error(errorMessage);
+        }
         
-        showToast('Offer accepted! Exchange in progress...', 'success');
-        loadMarketplace();
+        const data = await response.json();
+        
+        // Display success message with offer details
+        showToast('Offer accepted successfully! Exchange initiated.', 'success');
+        
+        // Refresh marketplace to remove the accepted offer
+        await loadMarketplace();
+        
+        // Also refresh My Offers if the user wants to see their accepted offers
+        if (state.connectedWallet) {
+            await loadMyOffers();
+        }
+        
     } catch (error) {
         console.error('Error accepting offer:', error);
-        showToast('Failed to accept offer', 'error');
+        showToast(error.message || 'Failed to accept offer', 'error');
     } finally {
         hideLoading();
+    }
+}
+
+function contactTrader(conversationId, otherUserId) {
+    // Navigate to chat view
+    switchView('chat');
+    
+    // Store the conversation context
+    state.activeConversationId = conversationId;
+    state.activeConversationUserId = otherUserId;
+    
+    // Load the conversation
+    loadConversationById(conversationId);
+    
+    showToast('Opening chat with trading partner...', 'success');
+}
+
+async function loadConversationById(conversationId) {
+    if (!conversationId) {
+        document.getElementById('chatMessages').innerHTML = 
+            '<p class="empty-state">No conversation found</p>';
+        return;
+    }
+    
+    try {
+        // Enable chat input
+        document.getElementById('chatInput').disabled = false;
+        document.getElementById('sendMessageBtn').disabled = false;
+        
+        // For now, show a placeholder indicating the conversation is ready
+        // In a full implementation, this would fetch messages from the conversation
+        document.getElementById('chatMessages').innerHTML = `
+            <p class="empty-state">Chat conversation loaded (Conversation ID: ${conversationId.substring(0, 8)}...)</p>
+            <p class="empty-state" style="margin-top: 1rem;">Messages are encrypted end-to-end. Start chatting to coordinate your trade.</p>
+        `;
+        
+        // Optionally fetch actual messages if the endpoint exists
+        const response = await fetch(`${API_BASE_URL}/api/chat/conversations/${conversationId}/messages`);
+        if (response.ok) {
+            const data = await response.json();
+            displayChatMessages(data.data || []);
+        }
+        
+    } catch (error) {
+        console.error('Error loading conversation:', error);
+        document.getElementById('chatMessages').innerHTML = 
+            '<p class="empty-state">Chat ready. Start messaging to coordinate your trade.</p>';
     }
 }
 
@@ -1659,7 +1809,10 @@ function displayMockMarketplace() {
             to_asset: 'ETH',
             from_amount: '3000',
             to_amount: '1.5',
-            status: 'active'
+            status: 'active',
+            user_id: '12345678-1234-1234-1234-123456789abc',
+            created_at: new Date(Date.now() - 3600000).toISOString(),
+            expires_at: new Date(Date.now() + 86400000).toISOString()
         },
         {
             id: '3',
@@ -1668,7 +1821,10 @@ function displayMockMarketplace() {
             to_asset: 'USDC',
             from_amount: '0.5',
             to_amount: '25000',
-            status: 'active'
+            status: 'active',
+            user_id: '87654321-4321-4321-4321-cba987654321',
+            created_at: new Date(Date.now() - 7200000).toISOString(),
+            expires_at: new Date(Date.now() + 172800000).toISOString()
         }
     ];
     displayMarketplace(mockOffers);

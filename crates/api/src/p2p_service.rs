@@ -59,6 +59,9 @@ pub struct P2POffer {
     pub escrow_tx_hash: Option<String>,
     pub matched_with_offer_id: Option<Uuid>,
     pub is_proximity_offer: bool,
+    pub acceptor_id: Option<Uuid>,
+    pub accepted_at: Option<DateTime<Utc>>,
+    pub conversation_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
@@ -139,7 +142,8 @@ impl P2PService {
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', $9, NOW(), NOW() + INTERVAL '24 hours')
                 RETURNING id, user_id, offer_type, from_asset, to_asset,
                           from_amount, to_amount, price, status, escrow_tx_hash,
-                          matched_with_offer_id, is_proximity_offer, created_at, expires_at
+                          matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                          conversation_id, created_at, expires_at
                 "#,
                 &[
                     &id,
@@ -175,7 +179,8 @@ impl P2PService {
                 r#"
                 SELECT id, user_id, offer_type, from_asset, to_asset,
                        from_amount, to_amount, price, status, escrow_tx_hash,
-                       matched_with_offer_id, is_proximity_offer, created_at, expires_at
+                       matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                       conversation_id, created_at, expires_at
                 FROM p2p_offers
                 WHERE status = 'ACTIVE'
                   AND expires_at > NOW()
@@ -191,6 +196,44 @@ impl P2PService {
 
         rows.iter().map(|row| self.row_to_offer(row)).collect()
     }
+    /// Get all active offers excluding the specified user's offers
+    /// Used for marketplace view
+    pub async fn get_marketplace_offers(
+        &self,
+        exclude_user_id: Uuid,
+        from_asset: Option<String>,
+        to_asset: Option<String>,
+        limit: i64,
+    ) -> Result<Vec<P2POffer>> {
+        let client = self.db.get().await.map_err(|e| {
+            Error::Database(format!("Failed to get database connection: {}", e))
+        })?;
+
+        let rows = client
+            .query(
+                r#"
+                SELECT id, user_id, offer_type, from_asset, to_asset,
+                       from_amount, to_amount, price, status, escrow_tx_hash,
+                       matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                       conversation_id, created_at, expires_at
+                FROM p2p_offers
+                WHERE status = 'ACTIVE'
+                  AND expires_at > NOW()
+                  AND user_id != $1
+                  AND ($2::TEXT IS NULL OR from_asset = $2)
+                  AND ($3::TEXT IS NULL OR to_asset = $3)
+                ORDER BY created_at DESC
+                LIMIT $4
+                "#,
+                &[&exclude_user_id, &from_asset, &to_asset, &limit],
+            )
+            .await
+            .map_err(|e| Error::Database(format!("Failed to fetch marketplace offers: {}", e)))?;
+
+        rows.iter().map(|row| self.row_to_offer(row)).collect()
+    }
+
+
 
     /// Get active offers for discovered proximity peers
     pub async fn get_proximity_offers(
@@ -209,7 +252,8 @@ impl P2PService {
                 r#"
                 SELECT id, user_id, offer_type, from_asset, to_asset,
                        from_amount, to_amount, price, status, escrow_tx_hash,
-                       matched_with_offer_id, is_proximity_offer, created_at, expires_at
+                       matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                       conversation_id, created_at, expires_at
                 FROM p2p_offers
                 WHERE status = 'ACTIVE'
                   AND expires_at > NOW()
@@ -246,7 +290,8 @@ impl P2PService {
                 r#"
                 SELECT id, user_id, offer_type, from_asset, to_asset,
                        from_amount, to_amount, price, status, escrow_tx_hash,
-                       matched_with_offer_id, is_proximity_offer, created_at, expires_at
+                       matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                       conversation_id, created_at, expires_at
                 FROM p2p_offers
                 WHERE status = 'ACTIVE'
                   AND expires_at > NOW()
@@ -299,6 +344,274 @@ impl P2PService {
         Ok(())
     }
 
+    /// Accept an offer and create an exchange
+    ///
+    /// This method:
+    /// 1. Validates the offer is in ACTIVE status
+    /// 2. Validates the acceptor is not the creator
+    /// 3. Updates offer status to MATCHED
+    /// 4. Records acceptor_id and accepted_at
+    /// 5. Creates an exchange record
+    ///
+    /// Returns the updated offer with acceptor information
+    /// Accept an offer and create an exchange
+    /// 
+    /// This method:
+    /// 1. Validates the offer is in ACTIVE status
+    /// 2. Validates the acceptor is not the creator
+    /// 3. Updates offer status to MATCHED
+    /// 4. Records acceptor_id and accepted_at
+    /// 5. Creates an exchange record
+    /// 6. Initiates chat conversation
+    /// 
+    /// Returns the updated offer with acceptor information
+    pub async fn accept_offer(
+        &self,
+        offer_id: Uuid,
+        acceptor_id: Uuid,
+        chat_service: &crate::chat_service::ChatService,
+    ) -> Result<P2POffer> {
+        tracing::info!(
+            offer_id = %offer_id,
+            acceptor_id = %acceptor_id,
+            "Attempting to accept offer"
+        );
+
+        let mut client = self.db.get().await.map_err(|e| {
+            tracing::error!(
+                offer_id = %offer_id,
+                acceptor_id = %acceptor_id,
+                error = %e,
+                "Failed to get database connection for offer acceptance"
+            );
+            Error::Database(format!("Failed to get database connection: {}", e))
+        })?;
+
+        // Start transaction for atomicity
+        let transaction = client.transaction().await.map_err(|e| {
+            tracing::error!(
+                offer_id = %offer_id,
+                acceptor_id = %acceptor_id,
+                error = %e,
+                "Failed to start database transaction for offer acceptance"
+            );
+            Error::Database(format!("Failed to start transaction: {}", e))
+        })?;
+
+        // Lock the offer row and fetch it
+        let offer_row = transaction
+            .query_opt(
+                r#"
+                SELECT id, user_id, offer_type, from_asset, to_asset,
+                       from_amount, to_amount, price, status, escrow_tx_hash,
+                       matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                       conversation_id, created_at, expires_at
+                FROM p2p_offers
+                WHERE id = $1
+                FOR UPDATE
+                "#,
+                &[&offer_id],
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    offer_id = %offer_id,
+                    acceptor_id = %acceptor_id,
+                    error = %e,
+                    "Failed to fetch and lock offer for acceptance"
+                );
+                Error::Database(format!("Failed to fetch offer: {}", e))
+            })?;
+
+        let offer_row = offer_row.ok_or_else(|| {
+            tracing::warn!(
+                offer_id = %offer_id,
+                acceptor_id = %acceptor_id,
+                "Offer not found for acceptance"
+            );
+            Error::Internal(format!("Offer {} not found", offer_id))
+        })?;
+
+        // Parse the offer to validate
+        let offer = self.row_to_offer(&offer_row)?;
+
+        // Validate acceptor is not the creator
+        if offer.user_id == acceptor_id {
+            tracing::warn!(
+                offer_id = %offer_id,
+                user_id = %offer.user_id,
+                acceptor_id = %acceptor_id,
+                "Validation failed: User attempted to accept their own offer"
+            );
+            return Err(Error::Validation(
+                "Cannot accept your own offer".to_string(),
+            ));
+        }
+
+        // Validate offer is in ACTIVE status
+        if offer.status != OfferStatus::Active {
+            tracing::warn!(
+                offer_id = %offer_id,
+                acceptor_id = %acceptor_id,
+                current_status = %offer.status.as_str(),
+                "Validation failed: Offer is not in ACTIVE status"
+            );
+            return Err(Error::Validation(format!(
+                "Offer is not available for acceptance (status: {})",
+                offer.status.as_str()
+            )));
+        }
+
+        // Validate offer has not expired
+        if offer.expires_at < Utc::now() {
+            tracing::warn!(
+                offer_id = %offer_id,
+                acceptor_id = %acceptor_id,
+                expires_at = %offer.expires_at,
+                "Validation failed: Offer has expired"
+            );
+            return Err(Error::Validation("Offer has expired".to_string()));
+        }
+
+        // Update offer status to MATCHED and record acceptor
+        let updated_row = transaction
+            .query_one(
+                r#"
+                UPDATE p2p_offers
+                SET status = 'MATCHED',
+                    acceptor_id = $2,
+                    accepted_at = NOW()
+                WHERE id = $1
+                RETURNING id, user_id, offer_type, from_asset, to_asset,
+                          from_amount, to_amount, price, status, escrow_tx_hash,
+                          matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                          conversation_id, created_at, expires_at
+                "#,
+                &[&offer_id, &acceptor_id],
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    offer_id = %offer_id,
+                    acceptor_id = %acceptor_id,
+                    error = %e,
+                    "Failed to update offer status to MATCHED"
+                );
+                Error::Database(format!("Failed to update offer: {}", e))
+            })?;
+
+        // Determine buyer and seller based on offer type
+        let (buyer_user_id, seller_user_id) = match offer.offer_type {
+            OfferType::Buy => (offer.user_id, acceptor_id),
+            OfferType::Sell => (acceptor_id, offer.user_id),
+        };
+
+        // Create exchange record
+        let exchange_id = Uuid::new_v4();
+        transaction
+            .execute(
+                r#"
+                INSERT INTO p2p_exchanges (
+                    id, buyer_offer_id, seller_offer_id, buyer_user_id, seller_user_id,
+                    asset, amount, price, platform_fee, status, executed_at
+                )
+                VALUES ($1, $2, $2, $3, $4, $5, $6, $7, 0, 'PENDING', NOW())
+                "#,
+                &[
+                    &exchange_id,
+                    &offer_id,
+                    &buyer_user_id,
+                    &seller_user_id,
+                    &offer.to_asset,
+                    &offer.to_amount,
+                    &offer.price,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    offer_id = %offer_id,
+                    acceptor_id = %acceptor_id,
+                    exchange_id = %exchange_id,
+                    buyer_user_id = %buyer_user_id,
+                    seller_user_id = %seller_user_id,
+                    error = %e,
+                    "Failed to create exchange record"
+                );
+                Error::Database(format!("Failed to create exchange record: {}", e))
+            })?;
+
+        // Commit transaction
+        transaction.commit().await.map_err(|e| {
+            tracing::error!(
+                offer_id = %offer_id,
+                acceptor_id = %acceptor_id,
+                exchange_id = %exchange_id,
+                error = %e,
+                "Failed to commit transaction for offer acceptance"
+            );
+            Error::Database(format!("Failed to commit transaction: {}", e))
+        })?;
+
+        tracing::info!(
+            offer_id = %offer_id,
+            acceptor_id = %acceptor_id,
+            creator_id = %offer.user_id,
+            exchange_id = %exchange_id,
+            "Successfully accepted offer and created exchange"
+        );
+
+        // Create chat conversation (graceful failure handling)
+        match chat_service
+            .create_conversation_from_offer(offer_id, offer.user_id, acceptor_id)
+            .await
+        {
+            Ok(conversation_id) => {
+                tracing::info!(
+                    offer_id = %offer_id,
+                    conversation_id = %conversation_id,
+                    creator_id = %offer.user_id,
+                    acceptor_id = %acceptor_id,
+                    "Successfully created conversation for accepted offer"
+                );
+
+                // Send notification to offer creator
+                if let Err(e) = chat_service
+                    .send_offer_notification(
+                        offer.user_id,
+                        acceptor_id,
+                        offer_id,
+                        format!("Your offer has been accepted!"),
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        offer_id = %offer_id,
+                        creator_id = %offer.user_id,
+                        acceptor_id = %acceptor_id,
+                        conversation_id = %conversation_id,
+                        error = %e,
+                        "Failed to send offer acceptance notification"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    offer_id = %offer_id,
+                    creator_id = %offer.user_id,
+                    acceptor_id = %acceptor_id,
+                    error = %e,
+                    "Failed to create chat conversation for offer acceptance, continuing with acceptance"
+                );
+                // Continue with offer acceptance even if chat fails
+            }
+        }
+
+        // Return updated offer
+        self.row_to_offer(&updated_row)
+    }
+
+
     /// Get user's offers
     pub async fn get_user_offers(&self, user_id: Uuid, limit: i64) -> Result<Vec<P2POffer>> {
         let client = self.db.get().await.map_err(|e| {
@@ -310,7 +623,8 @@ impl P2PService {
                 r#"
                 SELECT id, user_id, offer_type, from_asset, to_asset,
                        from_amount, to_amount, price, status, escrow_tx_hash,
-                       matched_with_offer_id, is_proximity_offer, created_at, expires_at
+                       matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                       conversation_id, created_at, expires_at
                 FROM p2p_offers
                 WHERE user_id = $1
                 ORDER BY created_at DESC
@@ -323,6 +637,34 @@ impl P2PService {
 
         rows.iter().map(|row| self.row_to_offer(row)).collect()
     }
+    /// Get a specific offer by ID
+    pub async fn get_offer(&self, offer_id: Uuid) -> Result<P2POffer> {
+        let client = self.db.get().await.map_err(|e| {
+            Error::Database(format!("Failed to get database connection: {}", e))
+        })?;
+
+        let row = client
+            .query_opt(
+                r#"
+                SELECT id, user_id, offer_type, from_asset, to_asset,
+                       from_amount, to_amount, price, status, escrow_tx_hash,
+                       matched_with_offer_id, is_proximity_offer, acceptor_id, accepted_at,
+                       conversation_id, created_at, expires_at
+                FROM p2p_offers
+                WHERE id = $1
+                "#,
+                &[&offer_id],
+            )
+            .await
+            .map_err(|e| Error::Database(format!("Failed to fetch offer: {}", e)))?;
+
+        match row {
+            Some(r) => self.row_to_offer(&r),
+            None => Err(Error::Internal(format!("Offer {} not found", offer_id))),
+        }
+    }
+
+
 
     /// Expire old offers (background job)
     pub async fn expire_old_offers(&self) -> Result<u64> {
@@ -379,6 +721,15 @@ impl P2PService {
             .try_get("expires_at")
             .map_err(|e| Error::Database(format!("Failed to get expires_at: {}", e)))?;
 
+        // Handle new optional fields
+        let acceptor_id: Option<Uuid> = row.try_get("acceptor_id").ok();
+        let accepted_at: Option<DateTime<Utc>> = row
+            .try_get::<_, Option<std::time::SystemTime>>("accepted_at")
+            .ok()
+            .flatten()
+            .map(DateTime::<Utc>::from);
+        let conversation_id: Option<Uuid> = row.try_get("conversation_id").ok();
+
         Ok(P2POffer {
             id: row.try_get("id").map_err(|e| Error::Database(format!("Failed to get id: {}", e)))?,
             user_id: row.try_get("user_id").map_err(|e| Error::Database(format!("Failed to get user_id: {}", e)))?,
@@ -392,6 +743,9 @@ impl P2PService {
             escrow_tx_hash: row.try_get("escrow_tx_hash").ok(),
             matched_with_offer_id: row.try_get("matched_with_offer_id").ok(),
             is_proximity_offer: row.try_get("is_proximity_offer").unwrap_or(false),
+            acceptor_id,
+            accepted_at,
+            conversation_id,
             created_at: DateTime::<Utc>::from(created_at_systime),
             expires_at: DateTime::<Utc>::from(expires_at_systime),
         })

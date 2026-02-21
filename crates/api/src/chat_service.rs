@@ -288,6 +288,230 @@ impl ChatService {
         Ok(())
     }
 
+    /// Create a chat conversation from a P2P offer
+    /// 
+    /// This method:
+    /// 1. Creates a conversation record
+    /// 2. Links conversation to the offer
+    /// 3. Adds both users as participants
+    /// 4. Allows messaging regardless of proximity
+    /// 
+    /// Returns the conversation ID
+    pub async fn create_conversation_from_offer(
+        &self,
+        offer_id: Uuid,
+        creator_id: Uuid,
+        acceptor_id: Uuid,
+    ) -> Result<Uuid> {
+        tracing::info!(
+            offer_id = %offer_id,
+            creator_id = %creator_id,
+            acceptor_id = %acceptor_id,
+            "Attempting to create conversation from offer"
+        );
+
+        let mut client = self.db.get().await.map_err(|e| {
+            tracing::error!(
+                offer_id = %offer_id,
+                creator_id = %creator_id,
+                acceptor_id = %acceptor_id,
+                error = %e,
+                "Failed to get database connection for conversation creation"
+            );
+            Error::Database(format!("Failed to get database connection: {}", e))
+        })?;
+
+        // Start transaction for atomicity
+        let transaction = client.transaction().await.map_err(|e| {
+            tracing::error!(
+                offer_id = %offer_id,
+                creator_id = %creator_id,
+                acceptor_id = %acceptor_id,
+                error = %e,
+                "Failed to start transaction for conversation creation"
+            );
+            Error::Database(format!("Failed to start transaction: {}", e))
+        })?;
+
+        // Create conversation record with offer_id reference
+        let conversation_id = Uuid::new_v4();
+        transaction
+            .execute(
+                r#"
+                INSERT INTO chat_conversations (id, offer_id, created_at, updated_at)
+                VALUES ($1, $2, NOW(), NOW())
+                "#,
+                &[&conversation_id, &offer_id],
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    offer_id = %offer_id,
+                    conversation_id = %conversation_id,
+                    creator_id = %creator_id,
+                    acceptor_id = %acceptor_id,
+                    error = %e,
+                    "Failed to create conversation record"
+                );
+                Error::Database(format!("Failed to create conversation: {}", e))
+            })?;
+
+        // Add creator as participant
+        transaction
+            .execute(
+                r#"
+                INSERT INTO chat_participants (conversation_id, user_id, joined_at)
+                VALUES ($1, $2, NOW())
+                "#,
+                &[&conversation_id, &creator_id],
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    offer_id = %offer_id,
+                    conversation_id = %conversation_id,
+                    creator_id = %creator_id,
+                    error = %e,
+                    "Failed to add creator as conversation participant"
+                );
+                Error::Database(format!("Failed to add creator as participant: {}", e))
+            })?;
+
+        // Add acceptor as participant
+        transaction
+            .execute(
+                r#"
+                INSERT INTO chat_participants (conversation_id, user_id, joined_at)
+                VALUES ($1, $2, NOW())
+                "#,
+                &[&conversation_id, &acceptor_id],
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    offer_id = %offer_id,
+                    conversation_id = %conversation_id,
+                    acceptor_id = %acceptor_id,
+                    error = %e,
+                    "Failed to add acceptor as conversation participant"
+                );
+                Error::Database(format!("Failed to add acceptor as participant: {}", e))
+            })?;
+
+        // Update offer with conversation_id
+        transaction
+            .execute(
+                r#"
+                UPDATE p2p_offers
+                SET conversation_id = $1
+                WHERE id = $2
+                "#,
+                &[&conversation_id, &offer_id],
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    offer_id = %offer_id,
+                    conversation_id = %conversation_id,
+                    error = %e,
+                    "Failed to update offer with conversation_id"
+                );
+                Error::Database(format!("Failed to update offer with conversation_id: {}", e))
+            })?;
+
+        // Commit transaction
+        transaction.commit().await.map_err(|e| {
+            tracing::error!(
+                offer_id = %offer_id,
+                conversation_id = %conversation_id,
+                creator_id = %creator_id,
+                acceptor_id = %acceptor_id,
+                error = %e,
+                "Failed to commit transaction for conversation creation"
+            );
+            Error::Database(format!("Failed to commit transaction: {}", e))
+        })?;
+
+        tracing::info!(
+            offer_id = %offer_id,
+            conversation_id = %conversation_id,
+            creator_id = %creator_id,
+            acceptor_id = %acceptor_id,
+            "Successfully created conversation from offer"
+        );
+
+        Ok(conversation_id)
+    }
+
+    /// Send a system notification about offer acceptance
+    pub async fn send_offer_notification(
+        &self,
+        to_user_id: Uuid,
+        from_user_id: Uuid,
+        offer_id: Uuid,
+        message: String,
+    ) -> Result<()> {
+        tracing::info!(
+            to_user_id = %to_user_id,
+            from_user_id = %from_user_id,
+            offer_id = %offer_id,
+            "Attempting to send offer acceptance notification"
+        );
+
+        // Store notification as a system message
+        let notification_id = Uuid::new_v4();
+        
+        let client = self.db.get().await.map_err(|e| {
+            tracing::error!(
+                to_user_id = %to_user_id,
+                from_user_id = %from_user_id,
+                offer_id = %offer_id,
+                error = %e,
+                "Failed to get database connection for notification"
+            );
+            Error::Database(format!("Failed to get database connection: {}", e))
+        })?;
+
+        client
+            .execute(
+                r#"
+                INSERT INTO chat_messages (
+                    id, from_user_id, to_user_id, content, encrypted,
+                    blockchain_hash, verification_status, read, created_at
+                )
+                VALUES ($1, $2, $3, $4, FALSE, NULL, NULL, FALSE, NOW())
+                "#,
+                &[
+                    &notification_id,
+                    &from_user_id,
+                    &to_user_id,
+                    &message,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    notification_id = %notification_id,
+                    to_user_id = %to_user_id,
+                    from_user_id = %from_user_id,
+                    offer_id = %offer_id,
+                    error = %e,
+                    "Failed to store notification message"
+                );
+                Error::Database(format!("Failed to store notification: {}", e))
+            })?;
+
+        tracing::info!(
+            notification_id = %notification_id,
+            to_user_id = %to_user_id,
+            from_user_id = %from_user_id,
+            offer_id = %offer_id,
+            "Successfully sent offer acceptance notification"
+        );
+
+        Ok(())
+    }
+
     /// Encrypt message content using AES-256-GCM
     fn encrypt_message(&self, content: &str, key: &[u8; 32]) -> Result<String> {
         let cipher = Aes256Gcm::new(key.into());
