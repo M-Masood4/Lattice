@@ -1,0 +1,28 @@
+[package]
+name = "monitoring"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared = { path = "../shared" }
+blockchain = { path = "../blockchain" }
+database = { path = "../database" }
+tokio.workspace = true
+tracing.workspace = true
+redis.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+solana-sdk.workspace = true
+solana-client.workspace = true
+solana-transaction-status.workspace = true
+deadpool-postgres.workspace = true
+tokio-postgres.workspace = true
+aws-config.workspace = true
+aws-sdk-sqs.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

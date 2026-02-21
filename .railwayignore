@@ -1,0 +1,36 @@
+# Railway Ignore File
+# Exclude files that don't need to be deployed
+
+# Development files
+.git/
+.github/
+.vscode/
+.kiro/
+
+# Build artifacts (will be rebuilt on Railway)
+target/
+*.log
+logs/
+.pids/
+
+# Local environment
+.env.local
+.env.development
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+tests/
+**/*_test.rs
+**/*_tests.rs
+
+# Scripts
+*.sh
+!start.sh
+
+# Temporary files
+*.tmp
+*.swp
+*~

@@ -1,0 +1,16 @@
+[package]
+name = "database"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared = { path = "../shared" }
+tokio-postgres.workspace = true
+deadpool-postgres.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+redis.workspace = true
+uuid.workspace = true
+rust_decimal.workspace = true
+chrono.workspace = true

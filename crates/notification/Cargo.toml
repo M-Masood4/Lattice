@@ -1,0 +1,16 @@
+[package]
+name = "notification"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared = { path = "../shared" }
+database = { path = "../database" }
+tokio-postgres.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+async-trait = "0.1"

@@ -1,0 +1,52 @@
+[package]
+name = "proximity"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+async-trait = "0.1"
+
+# mDNS for WiFi discovery
+mdns-sd = "0.10"
+
+# BLE for Bluetooth discovery
+btleplug = "0.11"
+
+# Cryptography for authentication (compatible with Solana 1.18)
+ed25519-dalek = "1.0"
+rand = "0.8"
+bs58 = "0.5"
+
+# QR code generation and scanning
+qrcode = "0.14"
+image = "0.25"
+rqrr = "0.8"
+
+# Database access
+tokio-postgres = { workspace = true }
+deadpool-postgres = { workspace = true }
+
+# Solana transaction support
+solana-client = { workspace = true }
+solana-sdk = { workspace = true }
+solana-transaction-status = { workspace = true }
+spl-token = "4.0"
+spl-associated-token-account = "2.3"
+
+# Shared crates
+database = { path = "../database" }
+blockchain = { path = "../blockchain" }
+
+[dev-dependencies]
+tokio-test = "0.4"

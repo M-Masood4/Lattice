@@ -1,0 +1,118 @@
+use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// Unique identifier for a peer
+pub type PeerId = String;
+
+/// Discovery method for finding peers
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiscoveryMethod {
+    WiFi,
+    Bluetooth,
+}
+
+impl std::fmt::Display for DiscoveryMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DiscoveryMethod::WiFi => write!(f, "WiFi"),
+            DiscoveryMethod::Bluetooth => write!(f, "Bluetooth"),
+        }
+    }
+}
+
+/// A discovered peer on the local network
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredPeer {
+    pub peer_id: PeerId,
+    pub user_tag: String,
+    pub wallet_address: String,
+    pub discovery_method: DiscoveryMethod,
+    pub signal_strength: Option<i8>,
+    pub verified: bool,
+    pub discovered_at: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
+}
+
+/// Status of a transfer request
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransferStatus {
+    Pending,
+    Accepted,
+    Rejected,
+    Executing,
+    Completed,
+    Failed,
+    Expired,
+}
+
+impl std::fmt::Display for TransferStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransferStatus::Pending => write!(f, "Pending"),
+            TransferStatus::Accepted => write!(f, "Accepted"),
+            TransferStatus::Rejected => write!(f, "Rejected"),
+            TransferStatus::Executing => write!(f, "Executing"),
+            TransferStatus::Completed => write!(f, "Completed"),
+            TransferStatus::Failed => write!(f, "Failed"),
+            TransferStatus::Expired => write!(f, "Expired"),
+        }
+    }
+}
+
+/// A transfer request between peers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferRequest {
+    pub id: Uuid,
+    pub sender_user_id: Uuid,
+    pub sender_wallet: String,
+    pub recipient_user_id: Uuid,
+    pub recipient_wallet: String,
+    pub asset: String,
+    pub amount: Decimal,
+    pub status: TransferStatus,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Discovery session information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoverySession {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub discovery_method: DiscoveryMethod,
+    pub started_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub auto_extend: bool,
+}
+
+/// Connection type for peer-to-peer communication
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionType {
+    WebRTC,
+    TcpSocket,
+    BleConnection,
+}
+
+/// Connection quality metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionQuality {
+    pub signal_strength: Option<i8>,
+    pub latency_ms: u32,
+    pub packet_loss_percent: f32,
+}
+
+/// Peer-to-peer message types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum PeerMessage {
+    Challenge { nonce: Vec<u8> },
+    ChallengeResponse { signature: Vec<u8>, public_key: Vec<u8> },
+    TransferRequest { request: TransferRequest },
+    TransferAccepted { request_id: Uuid },
+    TransferRejected { request_id: Uuid, reason: Option<String> },
+    TransferCompleted { request_id: Uuid, tx_hash: String },
+    Ping,
+    Pong,
+}
