@@ -3160,11 +3160,20 @@ async function loadNetworkStatus() {
         }
         
         const data = await response.json();
+        console.log('Network status received:', data.data);
         displayNetworkStatus(data.data);
         
     } catch (error) {
         console.error('Error loading network status:', error);
-        displayMockNetworkStatus();
+        // Show real status with zeros instead of mock data
+        displayNetworkStatus({
+            active_providers: [],
+            connected_peers: 0,
+            total_network_size: 0,
+            last_update_time: null,
+            data_freshness: 'Stale',
+            extended_offline: false
+        });
     }
 }
 
@@ -3188,6 +3197,12 @@ function displayNetworkStatus(status) {
     const connectedPeers = status.connected_peers || 0;
     const lastUpdate = status.last_update_time;
     
+    console.log('Displaying network status:', {
+        activeProviders: activeProviders.length,
+        connectedPeers,
+        totalSize: status.total_network_size
+    });
+    
     let warningHtml = '';
     
     // Check for warnings
@@ -3204,26 +3219,42 @@ function displayNetworkStatus(status) {
     }
     
     // Check for extended offline (10+ minutes)
+    if (status.extended_offline && status.offline_duration_minutes) {
+        warningHtml = `
+            <div class="network-offline-indicator">
+                <span class="offline-icon">🔴</span>
+                <span class="offline-text">Network Offline for ${status.offline_duration_minutes} minutes</span>
+            </div>
+        `;
+    }
+    
+    // Show last update time if available
+    let lastUpdateHtml = '';
     if (lastUpdate) {
-        const timeSinceUpdate = Date.now() - new Date(lastUpdate).getTime();
+        const updateTime = new Date(lastUpdate);
+        const timeSinceUpdate = Date.now() - updateTime.getTime();
         const minutesSinceUpdate = Math.floor(timeSinceUpdate / 60000);
         
-        if (minutesSinceUpdate >= 10) {
-            warningHtml = `
-                <div class="network-offline-indicator">
-                    <span class="offline-icon">🔴</span>
-                    <span class="offline-text">Network Offline for ${minutesSinceUpdate} minutes</span>
-                </div>
-            `;
+        if (minutesSinceUpdate < 1) {
+            lastUpdateHtml = '<div class="last-update">Last update: Just now</div>';
+        } else if (minutesSinceUpdate < 60) {
+            lastUpdateHtml = `<div class="last-update">Last update: ${minutesSinceUpdate} minute${minutesSinceUpdate > 1 ? 's' : ''} ago</div>`;
+        } else {
+            const hoursSinceUpdate = Math.floor(minutesSinceUpdate / 60);
+            lastUpdateHtml = `<div class="last-update warning">Last update: ${hoursSinceUpdate} hour${hoursSinceUpdate > 1 ? 's' : ''} ago</div>`;
         }
     }
     
     statusCard.innerHTML = `
         <div class="network-status-header">
             <h3 class="network-status-title">Mesh Network Status</h3>
+            <button class="refresh-button" onclick="loadNetworkStatus()" title="Refresh network status">
+                🔄
+            </button>
         </div>
         
         ${warningHtml}
+        ${lastUpdateHtml}
         
         <div class="network-status-grid">
             <div class="network-stat-item">
@@ -3246,19 +3277,6 @@ function displayNetworkStatus(status) {
             </div>
         </div>
     `;
-}
-
-function displayMockNetworkStatus() {
-    displayNetworkStatus({
-        active_providers: [
-            { node_id: 'abc123', last_seen: new Date().toISOString(), hop_count: 1 },
-            { node_id: 'def456', last_seen: new Date().toISOString(), hop_count: 2 }
-        ],
-        connected_peers: 5,
-        total_network_size: 12,
-        last_update_time: new Date().toISOString(),
-        data_freshness: 'JustNow'
-    });
 }
 
 // Enhanced Portfolio Display with Mesh Prices

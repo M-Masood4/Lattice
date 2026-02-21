@@ -225,8 +225,15 @@ impl NetworkStatusTracker {
         });
         drop(offline_since);
         
-        // Get connected peers count
-        let connected_peers = self.peer_manager.get_active_connections().await.len();
+        // Get connected peers count from PeerConnectionManager
+        let active_connections = self.peer_manager.get_active_connections().await;
+        let connected_peers = active_connections.len();
+        
+        tracing::info!(
+            "Network status: {} active providers, {} connected peers",
+            active_providers.len(),
+            connected_peers
+        );
         
         // Calculate total network size (estimate based on providers + peers)
         let total_network_size = active_providers.len() + connected_peers;

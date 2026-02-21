@@ -2867,12 +2867,20 @@ pub async fn get_mesh_network_status(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
     match state.mesh_price_service.get_network_status().await {
         Ok(status) => {
+            tracing::debug!(
+                "Returning network status: {} providers, {} peers",
+                status.active_providers.len(),
+                status.connected_peers
+            );
             let json_value = serde_json::to_value(&status).unwrap_or_default();
             Ok(Json(ApiResponse::success(json_value)))
         }
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::error(e.to_string())),
-        )),
+        Err(e) => {
+            tracing::error!("Failed to get network status: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error(e.to_string())),
+            ))
+        }
     }
 }

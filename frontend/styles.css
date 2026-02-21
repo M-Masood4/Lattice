@@ -2683,6 +2683,35 @@ body {
     color: var(--text-primary);
 }
 
+.refresh-button {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.2s;
+}
+
+.refresh-button:hover {
+    background: var(--primary-color);
+    transform: rotate(90deg);
+}
+
+.last-update {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+    padding: 0.5rem;
+    background: var(--bg-primary);
+    border-radius: 4px;
+}
+
+.last-update.warning {
+    color: var(--warning-color);
+    background: rgba(245, 158, 11, 0.1);
+}
+
 .network-status-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
