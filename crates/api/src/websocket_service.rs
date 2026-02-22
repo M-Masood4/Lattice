@@ -81,6 +81,41 @@ pub enum DashboardUpdate {
         source_node_id: String,
         freshness: String,
     },
+    /// Stealth payment detected during blockchain scan
+    StealthPaymentDetected {
+        payment_id: String,
+        stealth_address: String,
+        amount: u64,
+        ephemeral_public_key: String,
+        viewing_tag: String,
+        signature: String,
+        slot: u64,
+        timestamp: i64,
+    },
+    /// Payment added to offline queue
+    PaymentQueued {
+        payment_id: String,
+        stealth_address: String,
+        amount: u64,
+        timestamp: i64,
+    },
+    /// Payment successfully settled on-chain
+    PaymentSettled {
+        payment_id: String,
+        stealth_address: String,
+        amount: u64,
+        signature: String,
+        timestamp: i64,
+    },
+    /// Payment failed after retries
+    PaymentFailed {
+        payment_id: String,
+        stealth_address: String,
+        amount: u64,
+        error: String,
+        retry_count: u32,
+        timestamp: i64,
+    },
 }
 
 /// WebSocket service for managing real-time dashboard updates
@@ -255,6 +290,116 @@ impl WebSocketService {
         
         if let Err(e) = self.tx.send(update) {
             warn!("Failed to broadcast mesh price update: {}", e);
+        }
+    }
+
+    /// Broadcast a stealth payment detection to all connected clients
+    /// 
+    /// This method is called when the stealth scanner detects an incoming
+    /// payment during blockchain scanning.
+    /// 
+    /// Requirements: 10.4, 10.7
+    pub fn broadcast_stealth_payment_detected(
+        &self,
+        payment_id: Uuid,
+        stealth_address: String,
+        amount: u64,
+        ephemeral_public_key: String,
+        viewing_tag: [u8; 4],
+        signature: String,
+        slot: u64,
+    ) {
+        let update = DashboardUpdate::StealthPaymentDetected {
+            payment_id: payment_id.to_string(),
+            stealth_address,
+            amount,
+            ephemeral_public_key,
+            viewing_tag: hex::encode(viewing_tag),
+            signature,
+            slot,
+            timestamp: chrono::Utc::now().timestamp(),
+        };
+        
+        if let Err(e) = self.tx.send(update) {
+            warn!("Failed to broadcast stealth payment detection: {}", e);
+        }
+    }
+
+    /// Broadcast a payment queued event to all connected clients
+    /// 
+    /// This method is called when a stealth payment is added to the offline
+    /// payment queue.
+    /// 
+    /// Requirements: 10.4, 10.7
+    pub fn broadcast_payment_queued(
+        &self,
+        payment_id: Uuid,
+        stealth_address: String,
+        amount: u64,
+    ) {
+        let update = DashboardUpdate::PaymentQueued {
+            payment_id: payment_id.to_string(),
+            stealth_address,
+            amount,
+            timestamp: chrono::Utc::now().timestamp(),
+        };
+        
+        if let Err(e) = self.tx.send(update) {
+            warn!("Failed to broadcast payment queued: {}", e);
+        }
+    }
+
+    /// Broadcast a payment settled event to all connected clients
+    /// 
+    /// This method is called when a queued payment successfully settles
+    /// on the blockchain.
+    /// 
+    /// Requirements: 10.4, 10.7
+    pub fn broadcast_payment_settled(
+        &self,
+        payment_id: Uuid,
+        stealth_address: String,
+        amount: u64,
+        signature: String,
+    ) {
+        let update = DashboardUpdate::PaymentSettled {
+            payment_id: payment_id.to_string(),
+            stealth_address,
+            amount,
+            signature,
+            timestamp: chrono::Utc::now().timestamp(),
+        };
+        
+        if let Err(e) = self.tx.send(update) {
+            warn!("Failed to broadcast payment settled: {}", e);
+        }
+    }
+
+    /// Broadcast a payment failed event to all connected clients
+    /// 
+    /// This method is called when a queued payment fails after maximum
+    /// retry attempts.
+    /// 
+    /// Requirements: 10.4, 10.7
+    pub fn broadcast_payment_failed(
+        &self,
+        payment_id: Uuid,
+        stealth_address: String,
+        amount: u64,
+        error: String,
+        retry_count: u32,
+    ) {
+        let update = DashboardUpdate::PaymentFailed {
+            payment_id: payment_id.to_string(),
+            stealth_address,
+            amount,
+            error,
+            retry_count,
+            timestamp: chrono::Utc::now().timestamp(),
+        };
+        
+        if let Err(e) = self.tx.send(update) {
+            warn!("Failed to broadcast payment failed: {}", e);
         }
     }
 }

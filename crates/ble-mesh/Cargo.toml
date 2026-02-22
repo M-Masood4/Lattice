@@ -1,0 +1,45 @@
+[package]
+name = "ble-mesh"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# BLE support (cross-platform)
+btleplug = "0.11"
+
+# Async runtime
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = "0.1"
+rand = "0.8"
+
+# Logging
+tracing = { workspace = true }
+
+# Bloom filter for deduplication
+bloomfilter = "1.0"
+
+# Collections
+dashmap = "5.5"
+
+# Stealth address integration
+stealth = { path = "../stealth" }
+solana-sdk = { workspace = true }
+
+[dev-dependencies]
+# Property-based testing
+proptest = "1.4"
+tokio = { workspace = true, features = ["test-util"] }

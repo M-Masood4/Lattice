@@ -757,6 +757,241 @@ impl WalletService {
 
         Ok(portfolio)
     }
+
+    /// Generate a stealth meta-address for receiving private payments
+    /// 
+    /// This method creates a new stealth key pair and returns the meta-address
+    /// that can be shared with senders. The meta-address format is:
+    /// `stealth:1:<spending_pk>:<viewing_pk>`
+    /// 
+    /// # Arguments
+    /// * `user_id` - The user ID to associate with this stealth wallet
+    /// 
+    /// # Requirements
+    /// Validates: Requirements 10.2
+    /// 
+    /// # Returns
+    /// The stealth meta-address string
+    pub async fn generate_stealth_meta_address(&self, user_id: Uuid) -> Result<String> {
+        use stealth::keypair::StealthKeyPair;
+        
+        info!("Generating stealth meta-address for user {}", user_id);
+        
+        // Generate new stealth key pair
+        let keypair = StealthKeyPair::generate_standard()
+            .map_err(|e| Error::Internal(format!("Failed to generate stealth keypair: {}", e)))?;
+        
+        let meta_address = keypair.to_meta_address();
+        
+        // Store the keypair in the database (encrypted)
+        // Note: In production, this should use secure key storage (iOS Keychain, Android Keystore)
+        // For now, we'll store it in the database with encryption
+        let client = self.db_pool.get().await
+            .map_err(|e| Error::Database(format!("Failed to get database connection: {}", e)))?;
+        
+        // Export encrypted keypair
+        let password = format!("user_{}_stealth", user_id); // In production, use proper key derivation
+        let encrypted_keypair = keypair.export_encrypted(&password)
+            .map_err(|e| Error::Internal(format!("Failed to encrypt keypair: {}", e)))?;
+        
+        client
+            .execute(
+                "INSERT INTO stealth_wallets (user_id, meta_address, encrypted_keypair, created_at)
+                 VALUES ($1, $2, $3, NOW())
+                 ON CONFLICT (user_id) DO UPDATE SET meta_address = $2, encrypted_keypair = $3, updated_at = NOW()",
+                &[&user_id, &meta_address, &encrypted_keypair],
+            )
+            .await
+            .map_err(|e| Error::Database(format!("Failed to store stealth wallet: {}", e)))?;
+        
+        info!("Generated stealth meta-address: {}", meta_address);
+        
+        Ok(meta_address)
+    }
+
+    /// Prepare a stealth payment to a receiver
+    /// 
+    /// This method generates a one-time stealth address for the receiver using their
+    /// meta-address. The stealth address can then be used to send a private payment.
+    /// 
+    /// # Arguments
+    /// * `receiver_meta_address` - The receiver's stealth meta-address
+    /// * `amount` - Amount in lamports to send
+    /// 
+    /// # Requirements
+    /// Validates: Requirements 10.2
+    /// 
+    /// # Returns
+    /// PreparedStealthPayment containing the stealth address and metadata
+    pub async fn prepare_stealth_payment(
+        &self,
+        receiver_meta_address: &str,
+        amount: u64,
+    ) -> Result<PreparedStealthPayment> {
+        use stealth::generator::StealthAddressGenerator;
+        
+        info!(
+            "Preparing stealth payment of {} lamports to {}",
+            amount, receiver_meta_address
+        );
+        
+        // Generate stealth address
+        let stealth_output = StealthAddressGenerator::generate_stealth_address_uncached(
+            receiver_meta_address,
+            None, // Generate random ephemeral key
+        )
+        .map_err(|e| Error::Internal(format!("Failed to generate stealth address: {}", e)))?;
+        
+        Ok(PreparedStealthPayment {
+            stealth_address: stealth_output.stealth_address.to_string(),
+            amount,
+            ephemeral_public_key: stealth_output.ephemeral_public_key.to_string(),
+            viewing_tag: stealth_output.viewing_tag,
+        })
+    }
+
+    /// Send a stealth payment
+    /// 
+    /// This method submits a stealth payment transaction to the blockchain.
+    /// The transaction includes the payment transfer and stealth metadata.
+    /// 
+    /// # Arguments
+    /// * `payer_keypair` - The keypair paying for the transaction
+    /// * `prepared` - The prepared stealth payment
+    /// 
+    /// # Requirements
+    /// Validates: Requirements 10.2
+    /// 
+    /// # Returns
+    /// Transaction signature on success
+    pub async fn send_stealth_payment(
+        &self,
+        payer_keypair: &solana_sdk::signature::Keypair,
+        prepared: &PreparedStealthPayment,
+    ) -> Result<String> {
+        use solana_sdk::pubkey::Pubkey;
+        use std::str::FromStr;
+        
+        info!(
+            "Sending stealth payment of {} lamports to {}",
+            prepared.amount, prepared.stealth_address
+        );
+        
+        // Parse addresses
+        let stealth_address = Pubkey::from_str(&prepared.stealth_address)
+            .map_err(|e| Error::InvalidWalletAddress(format!("Invalid stealth address: {}", e)))?;
+        
+        let ephemeral_public_key = Pubkey::from_str(&prepared.ephemeral_public_key)
+            .map_err(|e| Error::Internal(format!("Invalid ephemeral key: {}", e)))?;
+        
+        // Submit transaction using blockchain client
+        let signature = self.solana_client
+            .submit_stealth_payment(
+                payer_keypair,
+                &stealth_address,
+                prepared.amount,
+                &ephemeral_public_key,
+                &prepared.viewing_tag,
+                1, // version 1 (standard mode)
+            )
+            .await?;
+        
+        info!("Stealth payment sent. Signature: {}", signature);
+        
+        Ok(signature.to_string())
+    }
+
+    /// Scan for incoming stealth payments
+    /// 
+    /// This method scans the blockchain for stealth payments sent to the user's
+    /// stealth wallet. It uses the viewing key to detect payments without exposing
+    /// the spending key.
+    /// 
+    /// # Arguments
+    /// * `user_id` - The user ID to scan for
+    /// * `from_slot` - Optional starting slot (defaults to last scanned slot)
+    /// * `to_slot` - Optional ending slot (defaults to current slot)
+    /// 
+    /// # Requirements
+    /// Validates: Requirements 10.2
+    /// 
+    /// # Returns
+    /// Vector of detected stealth payments
+    pub async fn scan_stealth_payments(
+        &self,
+        user_id: Uuid,
+        from_slot: Option<u64>,
+        to_slot: Option<u64>,
+    ) -> Result<Vec<DetectedStealthPayment>> {
+        use stealth::keypair::StealthKeyPair;
+        use stealth::scanner::StealthScanner;
+        
+        info!("Scanning stealth payments for user {}", user_id);
+        
+        // Load user's stealth wallet from database
+        let client = self.db_pool.get().await
+            .map_err(|e| Error::Database(format!("Failed to get database connection: {}", e)))?;
+        
+        let row = client
+            .query_one(
+                "SELECT meta_address, encrypted_keypair FROM stealth_wallets WHERE user_id = $1",
+                &[&user_id],
+            )
+            .await
+            .map_err(|e| Error::Database(format!("Stealth wallet not found for user: {}", e)))?;
+        
+        let encrypted_keypair: Vec<u8> = row.get(1);
+        
+        // Decrypt keypair
+        let password = format!("user_{}_stealth", user_id);
+        let keypair = StealthKeyPair::import_encrypted(&encrypted_keypair, &password)
+            .map_err(|e| Error::Internal(format!("Failed to decrypt keypair: {}", e)))?;
+        
+        // Create scanner
+        let rpc_url = "https://api.devnet.solana.com"; // TODO: Use configured RPC URL
+        let mut scanner = StealthScanner::new(&keypair, rpc_url);
+        
+        // Scan for payments
+        let detected: Vec<_> = scanner.scan_for_payments(from_slot, to_slot).await
+            .map_err(|e| Error::Internal(format!("Failed to scan for payments: {}", e)))?;
+        
+        // Convert to API response format
+        let payments: Vec<DetectedStealthPayment> = detected
+            .into_iter()
+            .map(|p| DetectedStealthPayment {
+                stealth_address: p.stealth_address.to_string(),
+                amount: p.amount,
+                ephemeral_public_key: p.ephemeral_public_key.to_string(),
+                viewing_tag: p.viewing_tag,
+                slot: p.slot,
+                signature: p.signature.to_string(),
+            })
+            .collect();
+        
+        info!("Found {} stealth payments", payments.len());
+        
+        Ok(payments)
+    }
+}
+
+/// Prepared stealth payment ready to send
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PreparedStealthPayment {
+    pub stealth_address: String,
+    pub amount: u64,
+    pub ephemeral_public_key: String,
+    pub viewing_tag: [u8; 4],
+}
+
+/// Detected stealth payment from blockchain scan
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DetectedStealthPayment {
+    pub stealth_address: String,
+    pub amount: u64,
+    pub ephemeral_public_key: String,
+    pub viewing_tag: [u8; 4],
+    pub slot: u64,
+    pub signature: String,
 }
 
 #[cfg(test)]

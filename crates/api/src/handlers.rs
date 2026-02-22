@@ -2884,3 +2884,291 @@ pub async fn get_mesh_network_status(
         }
     }
 }
+
+// ============================================================================
+// Stealth Address Handlers
+// ============================================================================
+
+/// Request to generate a stealth meta-address
+#[derive(Deserialize)]
+pub struct GenerateStealthAddressRequest {
+    pub version: Option<u8>, // 1 for standard, 2 for hybrid post-quantum
+}
+
+/// Response containing the generated meta-address
+#[derive(Serialize)]
+pub struct GenerateStealthAddressResponse {
+    pub meta_address: String,
+    pub version: u8,
+}
+
+/// Request to prepare a stealth payment
+#[derive(Deserialize)]
+pub struct PrepareStealthPaymentRequest {
+    pub receiver_meta_address: String,
+    pub amount: u64,
+}
+
+/// Response containing prepared stealth payment details
+#[derive(Serialize)]
+pub struct PrepareStealthPaymentResponse {
+    pub stealth_address: String,
+    pub amount: u64,
+    pub ephemeral_public_key: String,
+    pub viewing_tag: String, // Hex-encoded 4 bytes
+}
+
+/// Request to send a stealth payment
+#[derive(Deserialize)]
+pub struct SendStealthPaymentRequest {
+    pub stealth_address: String,
+    pub amount: u64,
+    pub ephemeral_public_key: String,
+    pub viewing_tag: String,
+    pub via_mesh: Option<bool>, // If true, send via BLE mesh network
+}
+
+/// Response for stealth payment send operation
+#[derive(Serialize)]
+pub struct SendStealthPaymentResponse {
+    pub status: String, // "queued", "settling", "settled"
+    pub payment_id: Option<String>,
+    pub signature: Option<String>,
+}
+
+/// Response for stealth payment scanning
+#[derive(Serialize)]
+pub struct ScanStealthPaymentsResponse {
+    pub payments: Vec<DetectedStealthPayment>,
+    pub last_scanned_slot: u64,
+}
+
+#[derive(Serialize)]
+pub struct DetectedStealthPayment {
+    pub stealth_address: String,
+    pub amount: u64,
+    pub ephemeral_public_key: String,
+    pub viewing_tag: String,
+    pub slot: u64,
+    pub signature: String,
+}
+
+/// Request to shield funds to a stealth address
+#[derive(Deserialize)]
+pub struct ShieldFundsRequest {
+    pub amount: u64,
+    pub source_keypair: String, // Base58-encoded secret key
+}
+
+/// Response for shield operation
+#[derive(Serialize)]
+pub struct ShieldFundsResponse {
+    pub stealth_address: String,
+    pub signature: String,
+}
+
+/// Request to unshield funds from a stealth address
+#[derive(Deserialize)]
+pub struct UnshieldFundsRequest {
+    pub stealth_address: String,
+    pub ephemeral_public_key: String,
+    pub amount: u64,
+    pub destination_address: String,
+}
+
+/// Response for unshield operation
+#[derive(Serialize)]
+pub struct UnshieldFundsResponse {
+    pub destination_address: String,
+    pub signature: String,
+}
+
+/// Response for payment queue status
+#[derive(Serialize)]
+pub struct PaymentQueueStatusResponse {
+    pub queued_payments: Vec<QueuedPaymentInfo>,
+    pub total_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct QueuedPaymentInfo {
+    pub payment_id: String,
+    pub stealth_address: String,
+    pub amount: u64,
+    pub status: String,
+    pub created_at: String,
+    pub retry_count: u32,
+}
+
+/// Generate a stealth meta-address
+/// Requirements: 10.3 (2.1, 2.2)
+pub async fn generate_stealth_address(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<GenerateStealthAddressRequest>,
+) -> Result<Json<ApiResponse<GenerateStealthAddressResponse>>, (StatusCode, Json<ApiResponse<GenerateStealthAddressResponse>>)> {
+    // TODO: Integrate with StealthWalletManager once available in AppState
+    // For now, return a placeholder response indicating the feature is being implemented
+    
+    let version = payload.version.unwrap_or(1);
+    
+    if version != 1 && version != 2 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Invalid version. Must be 1 (standard) or 2 (hybrid)".to_string())),
+        ));
+    }
+    
+    // Placeholder implementation
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(ApiResponse::error("Stealth address generation not yet integrated. StealthWalletManager needs to be added to AppState.".to_string())),
+    ))
+}
+
+/// Prepare a stealth payment (generate stealth address for receiver)
+/// Requirements: 10.3 (2.3, 2.4, 2.5)
+pub async fn prepare_stealth_payment(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<PrepareStealthPaymentRequest>,
+) -> Result<Json<ApiResponse<PrepareStealthPaymentResponse>>, (StatusCode, Json<ApiResponse<PrepareStealthPaymentResponse>>)> {
+    // Validate meta-address format
+    if !payload.receiver_meta_address.starts_with("stealth:") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Invalid meta-address format. Must start with 'stealth:'".to_string())),
+        ));
+    }
+    
+    if payload.amount == 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Amount must be greater than 0".to_string())),
+        ));
+    }
+    
+    // TODO: Integrate with StealthWalletManager
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(ApiResponse::error("Stealth payment preparation not yet integrated. StealthWalletManager needs to be added to AppState.".to_string())),
+    ))
+}
+
+/// Send or queue a stealth payment
+/// Requirements: 10.3 (5.1, 5.3, 8.1)
+pub async fn send_stealth_payment(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<SendStealthPaymentRequest>,
+) -> Result<Json<ApiResponse<SendStealthPaymentResponse>>, (StatusCode, Json<ApiResponse<SendStealthPaymentResponse>>)> {
+    // Validate inputs
+    if payload.amount == 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Amount must be greater than 0".to_string())),
+        ));
+    }
+    
+    if payload.viewing_tag.len() != 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Viewing tag must be 4 bytes (8 hex characters)".to_string())),
+        ));
+    }
+    
+    // TODO: Integrate with StealthWalletManager and BLEMeshHandler
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(ApiResponse::error("Stealth payment sending not yet integrated. StealthWalletManager and BLEMeshHandler need to be added to AppState.".to_string())),
+    ))
+}
+
+/// Scan blockchain for incoming stealth payments
+/// Requirements: 10.3 (3.1, 3.2, 3.3)
+pub async fn scan_stealth_payments(
+    State(_state): State<Arc<AppState>>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<ApiResponse<ScanStealthPaymentsResponse>>, (StatusCode, Json<ApiResponse<ScanStealthPaymentsResponse>>)> {
+    // Parse optional slot range parameters
+    let _from_slot = params
+        .get("from_slot")
+        .and_then(|s| s.parse::<u64>().ok());
+    
+    let _to_slot = params
+        .get("to_slot")
+        .and_then(|s| s.parse::<u64>().ok());
+    
+    // TODO: Integrate with StealthScanner
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(ApiResponse::error("Stealth payment scanning not yet integrated. StealthScanner needs to be added to AppState.".to_string())),
+    ))
+}
+
+/// Shield funds to a stealth address
+/// Requirements: 10.3 (7.1, 7.2, 7.3)
+pub async fn shield_funds(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<ShieldFundsRequest>,
+) -> Result<Json<ApiResponse<ShieldFundsResponse>>, (StatusCode, Json<ApiResponse<ShieldFundsResponse>>)> {
+    // Validate amount
+    if payload.amount == 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Amount must be greater than 0".to_string())),
+        ));
+    }
+    
+    // Validate source keypair format (should be base58-encoded)
+    if payload.source_keypair.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Source keypair is required".to_string())),
+        ));
+    }
+    
+    // TODO: Integrate with StealthWalletManager
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(ApiResponse::error("Shield operation not yet integrated. StealthWalletManager needs to be added to AppState.".to_string())),
+    ))
+}
+
+/// Unshield funds from a stealth address
+/// Requirements: 10.3 (7.2, 7.5)
+pub async fn unshield_funds(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<UnshieldFundsRequest>,
+) -> Result<Json<ApiResponse<UnshieldFundsResponse>>, (StatusCode, Json<ApiResponse<UnshieldFundsResponse>>)> {
+    // Validate amount
+    if payload.amount == 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Amount must be greater than 0".to_string())),
+        ));
+    }
+    
+    // Validate destination address
+    if payload.destination_address.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Destination address is required".to_string())),
+        ));
+    }
+    
+    // TODO: Integrate with StealthWalletManager
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(ApiResponse::error("Unshield operation not yet integrated. StealthWalletManager needs to be added to AppState.".to_string())),
+    ))
+}
+
+/// Get payment queue status
+/// Requirements: 10.3 (5.2, 5.4)
+pub async fn get_payment_queue_status(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<PaymentQueueStatusResponse>>, (StatusCode, Json<ApiResponse<PaymentQueueStatusResponse>>)> {
+    // TODO: Integrate with PaymentQueue
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(ApiResponse::error("Payment queue status not yet integrated. PaymentQueue needs to be added to AppState.".to_string())),
+    ))
+}
