@@ -1,4 +1,4 @@
-# 🐋 Crypto Trading Platform
+# Lattice Trading Platform
 
 > Comprehensive multi-chain cryptocurrency trading platform with AI-powered portfolio management, whale tracking, P2P exchange, proximity transfers, stealth payments, and BLE mesh networking.
 
