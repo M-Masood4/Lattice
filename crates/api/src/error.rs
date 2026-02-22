@@ -17,6 +17,7 @@ pub enum ApiError {
     // External API errors
     BirdeyeApiError(String),
     SideShiftApiError(String),
+    CoinMarketCapApiError(String),
     BlockchainRpcError(String),
     
     // Circuit breaker errors
@@ -69,6 +70,7 @@ impl fmt::Display for ApiError {
             ApiError::DatabaseConnectionError(msg) => write!(f, "Database connection error: {}", msg),
             ApiError::BirdeyeApiError(msg) => write!(f, "Birdeye API error: {}", msg),
             ApiError::SideShiftApiError(msg) => write!(f, "SideShift API error: {}", msg),
+            ApiError::CoinMarketCapApiError(msg) => write!(f, "CoinMarketCap API error: {}", msg),
             ApiError::BlockchainRpcError(msg) => write!(f, "Blockchain RPC error: {}", msg),
             ApiError::CircuitBreakerOpen(msg) => write!(f, "Service temporarily unavailable: {}", msg),
             ApiError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
@@ -121,6 +123,10 @@ impl IntoResponse for ApiError {
             }
             ApiError::SideShiftApiError(msg) => {
                 error!("SideShift API error: {}", msg);
+                (StatusCode::BAD_GATEWAY, "external_api_error", msg.clone())
+            }
+            ApiError::CoinMarketCapApiError(msg) => {
+                error!("CoinMarketCap API error: {}", msg);
                 (StatusCode::BAD_GATEWAY, "external_api_error", msg.clone())
             }
             ApiError::BlockchainRpcError(msg) => {

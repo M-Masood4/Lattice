@@ -9,22 +9,22 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::birdeye_service::BirdeyeService;
+use crate::coinmarketcap_service::CoinMarketCapService;
 use crate::coordination_service::CoordinationService;
 use crate::mesh_metrics::MeshMetricsCollector;
 use crate::mesh_types::{PriceData, PriceUpdate};
 
-/// Provider node that fetches price data from Birdeye API and broadcasts to the network
+/// Provider node that fetches price data from CoinMarketCap API and broadcasts to the network
 /// 
 /// A provider node is responsible for:
-/// - Validating API keys with Birdeye
+/// - Validating API keys with CoinMarketCap
 /// - Fetching price data on a regular interval (default 30 seconds)
 /// - Coordinating with other providers to avoid rate limits
 /// - Broadcasting price updates to all connected peers
 /// - Retrying failed API calls with exponential backoff
 pub struct ProviderNode {
-    /// Birdeye service for fetching price data
-    birdeye_service: Arc<BirdeyeService>,
+    /// CoinMarketCap service for fetching price data
+    coinmarketcap_service: Arc<CoinMarketCapService>,
     /// Peer connection manager for broadcasting to network
     peer_manager: Arc<PeerConnectionManager>,
     /// Coordination service for multi-provider coordination
@@ -43,20 +43,20 @@ impl ProviderNode {
     /// Create a new ProviderNode instance
     /// 
     /// # Arguments
-    /// * `birdeye_service` - Service for fetching price data from Birdeye API
+    /// * `coinmarketcap_service` - Service for fetching price data from CoinMarketCap API
     /// * `peer_manager` - Manager for peer connections and message broadcasting
     /// * `coordination_service` - Service for coordinating fetch timing with other providers
     /// * `metrics` - Metrics collector for tracking provider operations
     /// * `node_id` - Unique identifier for this provider node
     pub fn new(
-        birdeye_service: Arc<BirdeyeService>,
+        coinmarketcap_service: Arc<CoinMarketCapService>,
         peer_manager: Arc<PeerConnectionManager>,
         coordination_service: Arc<CoordinationService>,
         metrics: Arc<MeshMetricsCollector>,
         node_id: Uuid,
     ) -> Self {
         Self {
-            birdeye_service,
+            coinmarketcap_service,
             peer_manager,
             coordination_service,
             metrics,
@@ -66,9 +66,9 @@ impl ProviderNode {
         }
     }
 
-    /// Validate API key with Birdeye API
+    /// Validate API key with CoinMarketCap API
     /// 
-    /// Makes a test request to the Birdeye API to verify the API key is valid.
+    /// Makes a test request to the CoinMarketCap API to verify the API key is valid.
     /// This should be called before enabling provider mode.
     /// 
     /// # Arguments
@@ -78,21 +78,11 @@ impl ProviderNode {
     /// * `Ok(true)` - API key is valid
     /// * `Ok(false)` - API key is invalid
     /// * `Err(_)` - Error occurred during validation
-    pub async fn validate_api_key(&self, api_key: &str) -> Result<bool> {
-        info!("Validating Birdeye API key");
+    pub async fn validate_api_key(&self, _api_key: &str) -> Result<bool> {
+        info!("Validating CoinMarketCap API key");
         
-        // Create a temporary BirdeyeService with the provided API key
-        let redis = self.birdeye_service.redis.clone();
-        let temp_service = BirdeyeService::new(api_key.to_string(), redis);
-        
-        // Try to fetch price for a known token (SOL) to validate the key
-        // Using Solana mainnet SOL token address
-        let sol_address = "So11111111111111111111111111111111111111112";
-        
-        match temp_service
-            .get_asset_price(&crate::birdeye_service::Blockchain::Solana, sol_address)
-            .await
-        {
+        // Try to fetch price for a known token (BTC) to validate the key
+        match self.coinmarketcap_service.get_price_by_symbol("BTC").await {
             Ok(_) => {
                 info!("API key validation successful");
                 Ok(true)
@@ -122,7 +112,7 @@ impl ProviderNode {
         self.is_active.store(true, Ordering::SeqCst);
         
         // Clone Arc references for the background task
-        let birdeye_service = Arc::clone(&self.birdeye_service);
+        let coinmarketcap_service = Arc::clone(&self.coinmarketcap_service);
         let peer_manager = Arc::clone(&self.peer_manager);
         let coordination_service = Arc::clone(&self.coordination_service);
         let metrics = Arc::clone(&self.metrics);
@@ -149,7 +139,7 @@ impl ProviderNode {
                         
                         // Fetch and broadcast
                         if let Err(e) = Self::fetch_and_broadcast_static(
-                            &birdeye_service,
+                            &coinmarketcap_service,
                             &peer_manager,
                             &metrics,
                             node_id,
@@ -168,7 +158,7 @@ impl ProviderNode {
                         
                         // On coordination error, proceed with fetch anyway
                         if let Err(e) = Self::fetch_and_broadcast_static(
-                            &birdeye_service,
+                            &coinmarketcap_service,
                             &peer_manager,
                             &metrics,
                             node_id,
@@ -198,17 +188,17 @@ impl ProviderNode {
 
     /// Fetch price data and broadcast to network (static version for background task)
     async fn fetch_and_broadcast_static(
-        birdeye_service: &Arc<BirdeyeService>,
+        coinmarketcap_service: &Arc<CoinMarketCapService>,
         peer_manager: &Arc<PeerConnectionManager>,
         metrics: &Arc<MeshMetricsCollector>,
         node_id: Uuid,
     ) -> Result<()> {
-        debug!("Fetching price data from Birdeye API");
+        debug!("Fetching price data from CoinMarketCap API");
         
         let start = std::time::Instant::now();
         
         // Fetch prices with retry logic
-        let prices = match Self::fetch_prices_with_retry(birdeye_service, metrics, node_id).await {
+        let prices = match Self::fetch_prices_with_retry(coinmarketcap_service, metrics, node_id).await {
             Ok(p) => p,
             Err(e) => {
                 // Record fetch failure
@@ -218,7 +208,7 @@ impl ProviderNode {
         };
         
         if prices.is_empty() {
-            warn!("No price data fetched from Birdeye API");
+            warn!("No price data fetched from CoinMarketCap API");
             metrics.record_provider_fetch_failure(node_id, "empty_response").await;
             return Ok(());
         }
@@ -243,7 +233,7 @@ impl ProviderNode {
     /// Fetch and broadcast price data to the network
     /// 
     /// This method:
-    /// 1. Fetches price data from Birdeye API with retry logic
+    /// 1. Fetches price data from CoinMarketCap API with retry logic
     /// 2. Creates a PriceUpdate message with unique ID
     /// 3. Broadcasts the update to all connected peers
     /// 
@@ -252,14 +242,14 @@ impl ProviderNode {
     /// * `Err(_)` - Error occurred during fetch or broadcast
     pub async fn fetch_and_broadcast(&self) -> Result<()> {
         Self::fetch_and_broadcast_static(
-            &self.birdeye_service,
+            &self.coinmarketcap_service,
             &self.peer_manager,
             &self.metrics,
             self.node_id,
         ).await
     }
 
-    /// Fetch prices from Birdeye API with exponential backoff retry
+    /// Fetch prices from CoinMarketCap API with exponential backoff retry
     /// 
     /// Retries up to 3 times with exponential backoff on failure.
     /// 
@@ -267,7 +257,7 @@ impl ProviderNode {
     /// * `Ok(HashMap)` - Successfully fetched price data
     /// * `Err(_)` - All retry attempts failed
     async fn fetch_prices_with_retry(
-        birdeye_service: &Arc<BirdeyeService>,
+        coinmarketcap_service: &Arc<CoinMarketCapService>,
         metrics: &Arc<MeshMetricsCollector>,
         node_id: Uuid,
     ) -> Result<HashMap<String, PriceData>> {
@@ -279,7 +269,7 @@ impl ProviderNode {
             attempt += 1;
             debug!("Fetch attempt {}/{}", attempt, max_attempts);
             
-            match Self::fetch_prices_once(birdeye_service).await {
+            match Self::fetch_prices_once(coinmarketcap_service).await {
                 Ok(prices) => {
                     info!("Successfully fetched prices on attempt {}", attempt);
                     return Ok(prices);
@@ -304,36 +294,24 @@ impl ProviderNode {
         }
     }
 
-    /// Fetch prices from Birdeye API once (single attempt)
+    /// Fetch prices from CoinMarketCap API once (single attempt)
     async fn fetch_prices_once(
-        birdeye_service: &Arc<BirdeyeService>,
+        coinmarketcap_service: &Arc<CoinMarketCapService>,
     ) -> Result<HashMap<String, PriceData>> {
-        // For now, fetch prices for a few major tokens
-        // In a real implementation, this would fetch a configurable list of assets
-        let tokens = vec![
-            ("SOL", "So11111111111111111111111111111111111111112", "solana"),
-            ("USDC", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "solana"),
-        ];
+        // Fetch prices for major tokens
+        let symbols = vec!["BTC", "ETH", "SOL", "USDC", "USDT"];
         
         let mut prices = HashMap::new();
         
-        for (symbol, address, blockchain_str) in tokens {
-            let blockchain = match blockchain_str {
-                "solana" => crate::birdeye_service::Blockchain::Solana,
-                "ethereum" => crate::birdeye_service::Blockchain::Ethereum,
-                "bsc" => crate::birdeye_service::Blockchain::BinanceSmartChain,
-                "polygon" => crate::birdeye_service::Blockchain::Polygon,
-                _ => continue,
-            };
-            
-            match birdeye_service.get_asset_price(&blockchain, address).await {
+        for symbol in symbols {
+            match coinmarketcap_service.get_price_by_symbol(symbol).await {
                 Ok(price_data) => {
                     prices.insert(
                         symbol.to_string(),
                         PriceData {
                             asset: symbol.to_string(),
                             price: price_data.price_usd.to_string(),
-                            blockchain: blockchain_str.to_string(),
+                            blockchain: "multi".to_string(), // CMC is blockchain-agnostic
                             change_24h: price_data.price_change_24h.map(|d| d.to_string()),
                         },
                     );

@@ -12,6 +12,8 @@ pub mod handlers;
 pub mod rate_limit;
 pub mod security;
 pub mod birdeye_service;
+pub mod coinmarketcap_service;
+pub mod tantum_client;
 pub mod benchmark_service;
 pub mod price_monitor;
 pub mod sideshift_client;
@@ -50,7 +52,8 @@ pub use portfolio_cache::PortfolioCache;
 pub use whale_detection::{WhaleDetectionService, RankedWhale, WhaleAsset};
 pub use portfolio_monitor::PortfolioMonitor;
 pub use analytics::AnalyticsService;
-pub use birdeye_service::{BirdeyeService, Blockchain, WalletAddress};
+pub use coinmarketcap_service::{CoinMarketCapService, CmcPriceData, CmcConversionResult};
+pub use tantum_client::{TantumClient, TantumWalletInfo, TantumBalance, TantumToken};
 pub use benchmark_service::{BenchmarkService, Benchmark, CreateBenchmarkRequest, UpdateBenchmarkRequest, TriggerType, ActionType, TradeAction};
 pub use price_monitor::{PriceMonitor, TriggeredBenchmark};
 pub use sideshift_client::{SideShiftClient, ConversionQuote, ConversionOrder, OrderStatus, SupportedCoin, StakingInfo, AmountType};
@@ -105,7 +108,7 @@ pub struct AppState {
     pub whale_detection_service: Arc<WhaleDetectionService>,
     pub analytics_service: Arc<AnalyticsService>,
     pub benchmark_service: Arc<BenchmarkService>,
-    pub birdeye_service: Arc<BirdeyeService>,
+    pub coinmarketcap_service: Arc<CoinMarketCapService>,
     pub conversion_service: Arc<ConversionService>,
     pub staking_service: Arc<StakingService>,
     pub trim_config_service: Arc<TrimConfigService>,
@@ -135,7 +138,7 @@ impl AppState {
         whale_detection_service: Arc<WhaleDetectionService>,
         analytics_service: Arc<AnalyticsService>,
         benchmark_service: Arc<BenchmarkService>,
-        birdeye_service: Arc<BirdeyeService>,
+        coinmarketcap_service: Arc<CoinMarketCapService>,
         conversion_service: Arc<ConversionService>,
         staking_service: Arc<StakingService>,
         trim_config_service: Arc<TrimConfigService>,
@@ -163,7 +166,7 @@ impl AppState {
             whale_detection_service,
             analytics_service,
             benchmark_service,
-            birdeye_service,
+            coinmarketcap_service,
             conversion_service,
             staking_service,
             trim_config_service,

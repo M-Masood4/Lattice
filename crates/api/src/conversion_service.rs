@@ -9,20 +9,27 @@ use uuid::Uuid;
 
 use crate::sideshift_client::{AmountType, SideShiftClient};
 use crate::payment_receipt_service::PaymentReceiptService;
+use crate::coinmarketcap_service::CoinMarketCapService;
 use blockchain::Blockchain;
 
 /// Conversion service that orchestrates cryptocurrency swaps
 pub struct ConversionService {
     db_pool: Pool,
     sideshift_client: Arc<SideShiftClient>,
+    coinmarketcap_service: Arc<CoinMarketCapService>,
     receipt_service: Option<Arc<PaymentReceiptService>>,
 }
 
 impl ConversionService {
-    pub fn new(db_pool: Pool, sideshift_client: Arc<SideShiftClient>) -> Self {
+    pub fn new(
+        db_pool: Pool,
+        sideshift_client: Arc<SideShiftClient>,
+        coinmarketcap_service: Arc<CoinMarketCapService>,
+    ) -> Self {
         Self {
             db_pool,
             sideshift_client,
+            coinmarketcap_service,
             receipt_service: None,
         }
     }
@@ -31,11 +38,13 @@ impl ConversionService {
     pub fn new_with_receipts(
         db_pool: Pool,
         sideshift_client: Arc<SideShiftClient>,
+        coinmarketcap_service: Arc<CoinMarketCapService>,
         receipt_service: Arc<PaymentReceiptService>,
     ) -> Self {
         Self {
             db_pool,
             sideshift_client,
+            coinmarketcap_service,
             receipt_service: Some(receipt_service),
         }
     }
@@ -288,7 +297,7 @@ impl ConversionService {
         );
         
         // Get estimated exchange rate (in production, this would call Jupiter API)
-        let exchange_rate = self.get_estimated_rate(from_asset, to_asset)?;
+        let exchange_rate = self.get_estimated_rate(from_asset, to_asset).await?;
         
         // Calculate amounts based on type
         let (from_amount, to_amount) = match amount_type {
@@ -338,26 +347,31 @@ impl ConversionService {
         })
     }
     
-    /// Get estimated exchange rate for Solana token pairs
-    /// In production, this would call Jupiter or Birdeye price APIs
-    fn get_estimated_rate(&self, from_asset: &str, to_asset: &str) -> Result<Decimal> {
-        // Estimated rates based on approximate market prices (Feb 2026)
-        // In production, fetch real-time rates from Jupiter or price oracles
-        let rate = match (from_asset.to_uppercase().as_str(), to_asset.to_uppercase().as_str()) {
-            ("SOL", "USDC") => Decimal::from_str_exact("200.0")?,  // ~$200 per SOL
-            ("USDC", "SOL") => Decimal::from_str_exact("0.005")?,  // 1/200
-            ("SOL", "USDT") => Decimal::from_str_exact("200.0")?,
-            ("USDT", "SOL") => Decimal::from_str_exact("0.005")?,
-            ("USDC", "USDT") => Decimal::from_str_exact("1.0")?,   // Stablecoin parity
-            ("USDT", "USDC") => Decimal::from_str_exact("1.0")?,
-            ("SOL", "RAY") => Decimal::from_str_exact("40.0")?,    // Estimated
-            ("RAY", "SOL") => Decimal::from_str_exact("0.025")?,
-            ("SOL", "BONK") => Decimal::from_str_exact("10000000.0")?, // Estimated
-            ("BONK", "SOL") => Decimal::from_str_exact("0.0000001")?,
-            _ => anyhow::bail!("Exchange rate not available for {}/{}", from_asset, to_asset),
-        };
-        
-        Ok(rate)
+    /// Get estimated exchange rate using CoinMarketCap real-time prices
+    async fn get_estimated_rate(&self, from_asset: &str, to_asset: &str) -> Result<Decimal> {
+        // Use CoinMarketCap to get real-time conversion rate
+        match self.coinmarketcap_service.convert(from_asset, to_asset, Decimal::ONE).await {
+            Ok(conversion) => Ok(conversion.rate),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to get CMC rate for {}/{}: {}. Falling back to direct price calculation",
+                    from_asset,
+                    to_asset,
+                    e
+                );
+                
+                // Fallback: Calculate rate from individual prices
+                let from_price = self.coinmarketcap_service.get_price_by_symbol(from_asset).await?;
+                let to_price = self.coinmarketcap_service.get_price_by_symbol(to_asset).await?;
+                
+                if to_price.price_usd == Decimal::ZERO {
+                    anyhow::bail!("Cannot calculate rate: {} price is zero", to_asset);
+                }
+                
+                let rate = from_price.price_usd / to_price.price_usd;
+                Ok(rate)
+            }
+        }
     }
 
     /// Check if an asset is a Solana token

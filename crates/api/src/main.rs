@@ -1,5 +1,5 @@
 use anyhow::Result;
-use api::{AnalyticsService, AppState, BenchmarkService, BirdeyeService, ChatService, ConversionService, MeshPriceService, P2PService, PaymentReceiptService, PortfolioMonitor, PositionEvaluator, PositionManagementService, PriceMonitor, PrivacyService, ReceiptService, SideShiftClient, StakingService, TrimConfigService, TrimExecutor, VerificationService, WalletService, WebSocketService, WhaleDetectionService};
+use api::{AnalyticsService, AppState, BenchmarkService, ChatService, CoinMarketCapService, ConversionService, MeshPriceService, P2PService, PaymentReceiptService, PortfolioMonitor, PositionEvaluator, PositionManagementService, PriceMonitor, PrivacyService, ReceiptService, SideShiftClient, StakingService, TrimConfigService, TrimExecutor, VerificationService, WalletService, WebSocketService, WhaleDetectionService};
 use blockchain::SolanaClient;
 use database::{create_pool, create_redis_client, create_redis_pool, run_migrations};
 use notification::NotificationService;
@@ -46,13 +46,29 @@ async fn main() -> Result<()> {
     let solana_client = Arc::new(SolanaClient::new(config.solana.rpc_url.clone(), None));
     tracing::info!("Solana client initialized");
 
+    // Initialize Helius client for wallet analytics
+    let helius_api_key = std::env::var("HELIUS_API_KEY")
+        .unwrap_or_else(|_| "1266cbb3-f966-49e2-91f0-d3d04e52e69a".to_string());
+    let use_mainnet = std::env::var("USE_MAINNET")
+        .unwrap_or_else(|_| "false".to_string())
+        .parse::<bool>()
+        .unwrap_or(false);
+    
+    let tantum_client = Arc::new(api::TantumClient::new(
+        helius_api_key,
+        use_mainnet,
+    ));
+    tracing::info!("Helius client initialized (using {})", if use_mainnet { "mainnet" } else { "devnet" });
+
     // Initialize services
-    let wallet_service = Arc::new(WalletService::new(
+    let wallet_service = Arc::new(WalletService::new_with_tantum(
         solana_client.clone(),
+        tantum_client.clone(),
         db_pool.clone(),
         redis_pool.clone(),
+        use_mainnet,
     ));
-    tracing::info!("Wallet service initialized");
+    tracing::info!("Wallet service initialized with Helius API integration");
 
     let whale_detection_service = Arc::new(WhaleDetectionService::new(
         solana_client.clone(),
@@ -67,12 +83,14 @@ async fn main() -> Result<()> {
     let benchmark_service = Arc::new(BenchmarkService::new(db_pool.clone()));
     tracing::info!("Benchmark service initialized");
 
-    // Initialize Birdeye service for multi-chain price data
-    let birdeye_service = Arc::new(BirdeyeService::new(
-        config.birdeye.api_key.clone(),
+    // Initialize CoinMarketCap service for real-time crypto prices
+    let coinmarketcap_api_key = std::env::var("COINMARKETCAP_API_KEY")
+        .unwrap_or_else(|_| "7c900818e1a14a3eb98ce42e9ac293e5".to_string());
+    let coinmarketcap_service = Arc::new(CoinMarketCapService::new(
+        coinmarketcap_api_key,
         redis_pool.clone(),
     ));
-    tracing::info!("Birdeye service initialized");
+    tracing::info!("CoinMarketCap service initialized");
 
     // Initialize SideShift client for conversions
     let sideshift_client = Arc::new(SideShiftClient::new(
@@ -102,6 +120,7 @@ async fn main() -> Result<()> {
     let conversion_service = Arc::new(ConversionService::new_with_receipts(
         db_pool.clone(),
         sideshift_client.clone(),
+        coinmarketcap_service.clone(),
         payment_receipt_service.clone(),
     ));
     tracing::info!("Conversion service initialized with receipt generation");
@@ -172,7 +191,7 @@ async fn main() -> Result<()> {
     // Wires benchmark triggers to notification service (Requirement 2.3, 2.5)
     let price_monitor = Arc::new(PriceMonitor::new(
         benchmark_service.clone(),
-        birdeye_service.clone(),
+        coinmarketcap_service.clone(),
         position_management_service.clone(),
         notification_service.clone(),
         db_pool.clone(),
@@ -253,7 +272,7 @@ async fn main() -> Result<()> {
     // Uses the proximity P2P connection infrastructure for message routing
     let peer_connection_manager = Arc::new(proximity::PeerConnectionManager::new());
     let mesh_price_service = Arc::new(MeshPriceService::new(
-        birdeye_service.clone(),
+        coinmarketcap_service.clone(),
         peer_connection_manager,
         redis_pool.clone(),
         db_pool.clone(),
@@ -267,7 +286,7 @@ async fn main() -> Result<()> {
         whale_detection_service,
         analytics_service,
         benchmark_service,
-        birdeye_service,
+        coinmarketcap_service,
         conversion_service,
         staking_service,
         trim_config_service,
