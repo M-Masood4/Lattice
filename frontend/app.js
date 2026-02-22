@@ -114,6 +114,10 @@ function switchView(viewName) {
         initializeChatView();
     } else if (viewName === 'privacy') {
         initializePrivacyView();
+    } else if (viewName === 'stealth') {
+        if (typeof initializeStealthView === 'function') {
+            initializeStealthView();
+        }
     } else if (viewName === 'proximity') {
         initializeProximityView();
     } else if (viewName === 'settings' && state.connectedWallet) {
