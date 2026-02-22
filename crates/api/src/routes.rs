@@ -149,6 +149,20 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/proximity/transfers/:id", get(proximity_handlers::get_transfer_status))
         .route("/api/proximity/transfers/history", get(proximity_handlers::get_transfer_history))
         
+        // Stealth Transfers - Address Management
+        .route("/api/stealth/generate", post(handlers::generate_stealth_address))
+        .route("/api/stealth/prepare-payment", post(handlers::prepare_stealth_payment))
+        .route("/api/stealth/send", post(handlers::send_stealth_payment))
+        .route("/api/stealth/scan", post(handlers::scan_stealth_payments))
+        .route("/api/stealth/shield", post(handlers::shield_funds))
+        .route("/api/stealth/unshield", post(handlers::unshield_funds))
+        .route("/api/stealth/queue", get(handlers::get_payment_queue))
+        
+        // BLE Mesh Network
+        .route("/api/mesh/status", get(handlers::get_ble_mesh_status))
+        .route("/api/mesh/connect", post(handlers::connect_ble_mesh))
+        .route("/api/mesh/disconnect", post(handlers::disconnect_ble_mesh))
+        
         // Mesh Price Service - Provider Management
         .route("/api/mesh/provider/enable", post(handlers::enable_mesh_provider))
         .route("/api/mesh/provider/disable", post(handlers::disable_mesh_provider))

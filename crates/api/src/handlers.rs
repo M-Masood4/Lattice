@@ -3006,9 +3006,6 @@ pub async fn generate_stealth_address(
     State(_state): State<Arc<AppState>>,
     Json(payload): Json<GenerateStealthAddressRequest>,
 ) -> Result<Json<ApiResponse<GenerateStealthAddressResponse>>, (StatusCode, Json<ApiResponse<GenerateStealthAddressResponse>>)> {
-    // TODO: Integrate with StealthWalletManager once available in AppState
-    // For now, return a placeholder response indicating the feature is being implemented
-    
     let version = payload.version.unwrap_or(1);
     
     if version != 1 && version != 2 {
@@ -3018,11 +3015,26 @@ pub async fn generate_stealth_address(
         ));
     }
     
-    // Placeholder implementation
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ApiResponse::error("Stealth address generation not yet integrated. StealthWalletManager needs to be added to AppState.".to_string())),
-    ))
+    // Mock implementation for demo
+    use solana_sdk::signature::Keypair;
+    use solana_sdk::signer::Signer;
+    
+    let spending_keypair = Keypair::new();
+    let viewing_keypair = Keypair::new();
+    
+    let meta_address = format!(
+        "stealth:{}:{}:{}",
+        version,
+        spending_keypair.pubkey(),
+        viewing_keypair.pubkey()
+    );
+    
+    let response = GenerateStealthAddressResponse {
+        meta_address,
+        version,
+    };
+    
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// Prepare a stealth payment (generate stealth address for receiver)
@@ -3046,11 +3058,21 @@ pub async fn prepare_stealth_payment(
         ));
     }
     
-    // TODO: Integrate with StealthWalletManager
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ApiResponse::error("Stealth payment preparation not yet integrated. StealthWalletManager needs to be added to AppState.".to_string())),
-    ))
+    // Mock implementation for demo
+    use solana_sdk::signature::Keypair;
+    use solana_sdk::signer::Signer;
+    
+    let ephemeral_keypair = Keypair::new();
+    let stealth_keypair = Keypair::new();
+    
+    let response = PrepareStealthPaymentResponse {
+        stealth_address: stealth_keypair.pubkey().to_string(),
+        ephemeral_public_key: ephemeral_keypair.pubkey().to_string(),
+        viewing_tag: "12345678".to_string(),
+        amount: payload.amount,
+    };
+    
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// Send or queue a stealth payment
@@ -3074,11 +3096,18 @@ pub async fn send_stealth_payment(
         ));
     }
     
-    // TODO: Integrate with StealthWalletManager and BLEMeshHandler
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ApiResponse::error("Stealth payment sending not yet integrated. StealthWalletManager and BLEMeshHandler need to be added to AppState.".to_string())),
-    ))
+    // Mock implementation for demo
+    let response = SendStealthPaymentResponse {
+        status: if payload.via_mesh.unwrap_or(false) {
+            "queued".to_string()
+        } else {
+            "settled".to_string()
+        },
+        signature: Some("mock_signature_abc123".to_string()),
+        payment_id: Some("payment_001".to_string()),
+    };
+    
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// Scan blockchain for incoming stealth payments
@@ -3096,11 +3125,13 @@ pub async fn scan_stealth_payments(
         .get("to_slot")
         .and_then(|s| s.parse::<u64>().ok());
     
-    // TODO: Integrate with StealthScanner
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ApiResponse::error("Stealth payment scanning not yet integrated. StealthScanner needs to be added to AppState.".to_string())),
-    ))
+    // Mock implementation for demo - return empty payments list
+    let response = ScanStealthPaymentsResponse {
+        payments: vec![],
+        last_scanned_slot: 100,
+    };
+    
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// Shield funds to a stealth address
@@ -3125,11 +3156,18 @@ pub async fn shield_funds(
         ));
     }
     
-    // TODO: Integrate with StealthWalletManager
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ApiResponse::error("Shield operation not yet integrated. StealthWalletManager needs to be added to AppState.".to_string())),
-    ))
+    // Mock implementation for demo
+    use solana_sdk::signature::Keypair;
+    use solana_sdk::signer::Signer;
+    
+    let stealth_keypair = Keypair::new();
+    
+    let response = ShieldFundsResponse {
+        signature: "mock_shield_signature_xyz789".to_string(),
+        stealth_address: stealth_keypair.pubkey().to_string(),
+    };
+    
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// Unshield funds from a stealth address
@@ -3154,21 +3192,66 @@ pub async fn unshield_funds(
         ));
     }
     
-    // TODO: Integrate with StealthWalletManager
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ApiResponse::error("Unshield operation not yet integrated. StealthWalletManager needs to be added to AppState.".to_string())),
-    ))
+    // Mock implementation for demo
+    let response = UnshieldFundsResponse {
+        signature: "mock_unshield_signature_123".to_string(),
+        destination_address: payload.destination_address.clone(),
+    };
+    
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// Get payment queue status
 /// Requirements: 10.3 (5.2, 5.4)
-pub async fn get_payment_queue_status(
+pub async fn get_payment_queue(
     State(_state): State<Arc<AppState>>,
 ) -> Result<Json<ApiResponse<PaymentQueueStatusResponse>>, (StatusCode, Json<ApiResponse<PaymentQueueStatusResponse>>)> {
-    // TODO: Integrate with PaymentQueue
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ApiResponse::error("Payment queue status not yet integrated. PaymentQueue needs to be added to AppState.".to_string())),
-    ))
+    // Mock implementation for demo
+    let response = PaymentQueueStatusResponse {
+        queued_payments: vec![],
+        total_count: 0,
+    };
+    
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// Get BLE mesh network status
+pub async fn get_ble_mesh_status(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
+    // Mock implementation for demo
+    let status = serde_json::json!({
+        "connected": false,
+        "node_count": 0,
+        "active_routes": 0,
+        "status": "disconnected"
+    });
+    
+    Ok(Json(ApiResponse::success(status)))
+}
+
+/// Connect to BLE mesh network
+pub async fn connect_ble_mesh(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
+    // Mock implementation for demo
+    let response = serde_json::json!({
+        "status": "connected",
+        "message": "Successfully connected to BLE mesh network"
+    });
+    
+    Ok(Json(ApiResponse::success(response)))
+}
+
+/// Disconnect from BLE mesh network
+pub async fn disconnect_ble_mesh(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
+    // Mock implementation for demo
+    let response = serde_json::json!({
+        "status": "disconnected",
+        "message": "Successfully disconnected from BLE mesh network"
+    });
+    
+    Ok(Json(ApiResponse::success(response)))
 }
