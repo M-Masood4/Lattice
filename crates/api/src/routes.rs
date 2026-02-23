@@ -32,6 +32,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/users/:user_id/tag", put(handlers::update_user_tag))
         .route("/api/wallets/connect", post(handlers::connect_wallet))
         .route("/api/wallets/:address/portfolio", get(handlers::get_portfolio))
+        .route("/api/wallets/:address/multi-chain-portfolio", get(handlers::get_portfolio)) // Alias for frontend compatibility
         .route("/api/wallets/multi-chain/:user_id", get(handlers::get_multi_chain_portfolio))
         
         // Whale Tracking
@@ -172,6 +173,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/mesh/prices", get(handlers::get_mesh_prices))
         .route("/api/mesh/prices/:asset", get(handlers::get_mesh_price_by_asset))
         .route("/api/mesh/network/status", get(handlers::get_mesh_network_status))
+        
+        // CoinMarketCap Price Data
+        .route("/api/cmc/price", get(handlers::get_crypto_price))
+        .route("/api/cmc/prices", get(handlers::get_crypto_prices))
+        .route("/api/cmc/convert", get(handlers::convert_crypto))
         
         .with_state(state)
         // Serve static frontend files

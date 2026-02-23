@@ -280,11 +280,48 @@ pub async fn connect_wallet(
 }
 
 pub async fn get_portfolio(
-    State(_state): State<Arc<AppState>>,
-    Path(_address): Path<String>,
-) -> impl IntoResponse {
-    // TODO: Implement portfolio retrieval
-    (StatusCode::NOT_IMPLEMENTED, Json(ApiResponse::<()>::error("Not implemented".to_string())))
+    State(state): State<Arc<AppState>>,
+    Path(address): Path<String>,
+) -> Result<Json<ApiResponse<shared::models::Portfolio>>, (StatusCode, Json<ApiResponse<shared::models::Portfolio>>)> {
+    tracing::info!("get_portfolio handler called for address: {}", address);
+    
+    // Try to get existing portfolio
+    match state.wallet_service.get_portfolio(&address).await {
+        Ok(portfolio) => {
+            tracing::info!("Successfully retrieved portfolio for {}", address);
+            Ok(Json(ApiResponse::success(portfolio)))
+        },
+        Err(shared::Error::WalletNotFound(_)) => {
+            tracing::info!("Wallet not found, attempting to connect: {}", address);
+            // Wallet not found - try to connect it first with a demo user
+            // In production, this should use the authenticated user's ID
+            let demo_user_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+                .expect("Invalid demo user UUID");
+            
+            match state.wallet_service.connect_wallet(&address, demo_user_id).await {
+                Ok(portfolio) => {
+                    tracing::info!("Successfully connected wallet and retrieved portfolio for {}", address);
+                    Ok(Json(ApiResponse::success(portfolio)))
+                },
+                Err(e) => {
+                    tracing::error!("Failed to connect wallet {}: {}", address, e);
+                    let status = match e {
+                        shared::Error::InvalidWalletAddress(_) => StatusCode::BAD_REQUEST,
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    Err((status, Json(ApiResponse::error(e.to_string()))))
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!("Error getting portfolio for {}: {}", address, e);
+            let status = match e {
+                shared::Error::InvalidWalletAddress(_) => StatusCode::BAD_REQUEST,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            Err((status, Json(ApiResponse::error(e.to_string()))))
+        }
+    }
 }
 
 // Whale Tracking
@@ -1903,67 +1940,19 @@ pub async fn get_dashboard_data(
 // ============================================================================
 
 /// Get multi-chain portfolio for a user
+/// NOTE: This handler is currently disabled as it requires Birdeye API which has been removed.
+/// CoinMarketCap does not provide multi-chain portfolio aggregation.
+/// Consider implementing this using individual blockchain clients instead.
 pub async fn get_multi_chain_portfolio(
-    State(state): State<Arc<AppState>>,
-    Path(user_id): Path<Uuid>,
+    State(_state): State<Arc<AppState>>,
+    Path(_user_id): Path<Uuid>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
-    // Get user's wallet addresses from database
-    let client = match state.db_pool.get().await {
-        Ok(c) => c,
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::error(format!("Database error: {}", e))),
-            ));
-        }
-    };
-
-    let rows = match client
-        .query(
-            "SELECT blockchain, address FROM multi_chain_wallets WHERE user_id = $1",
-            &[&user_id],
-        )
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::error(format!("Failed to fetch wallets: {}", e))),
-            ));
-        }
-    };
-
-    let mut wallet_addresses = Vec::new();
-    for row in rows {
-        let blockchain: String = row.get(0);
-        let address: String = row.get(1);
-        
-        let blockchain_enum = match blockchain.as_str() {
-            "Solana" => crate::Blockchain::Solana,
-            "Ethereum" => crate::Blockchain::Ethereum,
-            "BinanceSmartChain" | "BSC" => crate::Blockchain::BinanceSmartChain,
-            "Polygon" => crate::Blockchain::Polygon,
-            _ => continue,
-        };
-        
-        wallet_addresses.push(crate::WalletAddress {
-            blockchain: blockchain_enum,
-            address,
-        });
-    }
-
-    // Fetch portfolio from Birdeye
-    match state.birdeye_service.get_multi_chain_portfolio(wallet_addresses).await {
-        Ok(portfolio) => {
-            let json_value = serde_json::to_value(&portfolio).unwrap_or_default();
-            Ok(Json(ApiResponse::success(json_value)))
-        }
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::error(format!("Failed to fetch portfolio: {}", e))),
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(ApiResponse::error(
+            "Multi-chain portfolio aggregation is not currently available. Birdeye API has been removed in favor of CoinMarketCap.".to_string()
         )),
-    }
+    ))
 }
 
 // ============================================================================
@@ -3254,4 +3243,91 @@ pub async fn disconnect_ble_mesh(
     });
     
     Ok(Json(ApiResponse::success(response)))
+}
+
+
+// ============================================
+// CoinMarketCap Price Handlers
+// ============================================
+
+#[derive(Deserialize)]
+pub struct GetPriceQuery {
+    pub symbol: String,
+}
+
+#[derive(Deserialize)]
+pub struct GetPricesQuery {
+    pub symbols: String, // Comma-separated list
+}
+
+#[derive(Deserialize)]
+pub struct ConvertCryptoQuery {
+    pub from: String,
+    pub to: String,
+    pub amount: String,
+}
+
+/// Get real-time price for a cryptocurrency
+pub async fn get_crypto_price(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<GetPriceQuery>,
+) -> Result<Json<ApiResponse<crate::CmcPriceData>>, (StatusCode, Json<ApiResponse<crate::CmcPriceData>>)> {
+    match state.coinmarketcap_service.get_price_by_symbol(&params.symbol).await {
+        Ok(price_data) => Ok(Json(ApiResponse::success(price_data))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(format!("Failed to fetch price: {}", e))),
+        )),
+    }
+}
+
+/// Get real-time prices for multiple cryptocurrencies
+pub async fn get_crypto_prices(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<GetPricesQuery>,
+) -> Result<Json<ApiResponse<Vec<crate::CmcPriceData>>>, (StatusCode, Json<ApiResponse<Vec<crate::CmcPriceData>>>)> {
+    let symbols: Vec<String> = params
+        .symbols
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .collect();
+
+    match state.coinmarketcap_service.get_prices_by_symbols(&symbols).await {
+        Ok(prices) => Ok(Json(ApiResponse::success(prices))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(format!("Failed to fetch prices: {}", e))),
+        )),
+    }
+}
+
+/// Convert between two cryptocurrencies
+pub async fn convert_crypto(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ConvertCryptoQuery>,
+) -> Result<Json<ApiResponse<crate::CmcConversionResult>>, (StatusCode, Json<ApiResponse<crate::CmcConversionResult>>)> {
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    let amount = match Decimal::from_str(&params.amount) {
+        Ok(amt) => amt,
+        Err(e) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::error(format!("Invalid amount: {}", e))),
+            ))
+        }
+    };
+
+    match state
+        .coinmarketcap_service
+        .convert(&params.from, &params.to, amount)
+        .await
+    {
+        Ok(conversion) => Ok(Json(ApiResponse::success(conversion))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(format!("Failed to convert: {}", e))),
+        )),
+    }
 }

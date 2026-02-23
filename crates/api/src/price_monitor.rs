@@ -1,5 +1,5 @@
 use crate::benchmark_service::{ActionType, Benchmark, BenchmarkService, TriggerType};
-use crate::birdeye_service::{BirdeyeService, Blockchain};
+use crate::coinmarketcap_service::CoinMarketCapService;
 use crate::position_management_service::{PositionManagementService, PositionMode};
 use database::DbPool;
 use notification::NotificationService;
@@ -21,7 +21,7 @@ use tracing::{debug, error, info, warn};
 /// **Validates: Requirements 2.3, 2.5**
 pub struct PriceMonitor {
     benchmark_service: Arc<BenchmarkService>,
-    birdeye_service: Arc<BirdeyeService>,
+    coinmarketcap_service: Arc<CoinMarketCapService>,
     position_management_service: Arc<PositionManagementService>,
     #[allow(dead_code)]
     notification_service: Arc<NotificationService>,
@@ -42,19 +42,19 @@ impl PriceMonitor {
     /// 
     /// # Arguments
     /// * `benchmark_service` - Service for managing benchmarks
-    /// * `birdeye_service` - Service for fetching asset prices
+    /// * `coinmarketcap_service` - Service for fetching asset prices
     /// * `notification_service` - Service for sending notifications
     /// * `db_pool` - Database connection pool
     pub fn new(
         benchmark_service: Arc<BenchmarkService>,
-        birdeye_service: Arc<BirdeyeService>,
+        coinmarketcap_service: Arc<CoinMarketCapService>,
         position_management_service: Arc<PositionManagementService>,
         notification_service: Arc<NotificationService>,
         db_pool: DbPool,
     ) -> Self {
         Self {
             benchmark_service,
-            birdeye_service,
+            coinmarketcap_service,
             position_management_service,
             notification_service,
             db_pool,
@@ -99,8 +99,8 @@ impl PriceMonitor {
         info!("Checking {} unique assets for benchmark triggers", assets.len());
         
         // Check each asset
-        for (asset, blockchain) in assets {
-            if let Err(e) = self.check_asset_benchmarks(&asset, &blockchain).await {
+        for asset in assets {
+            if let Err(e) = self.check_asset_benchmarks(&asset).await {
                 error!("Error checking benchmarks for asset {}: {:?}", asset, e);
                 // Continue checking other assets even if one fails
             }
@@ -110,14 +110,14 @@ impl PriceMonitor {
     }
 
     /// Get all unique assets that have active benchmarks
-    async fn get_active_assets(&self) -> Result<Vec<(String, Blockchain)>> {
+    async fn get_active_assets(&self) -> Result<Vec<String>> {
         let client = self.db_pool.get().await.map_err(|e| {
             Error::Database(format!("Failed to get database connection: {}", e))
         })?;
         
         let rows = client
             .query(
-                "SELECT DISTINCT asset, blockchain FROM benchmarks WHERE is_active = TRUE",
+                "SELECT DISTINCT asset FROM benchmarks WHERE is_active = TRUE",
                 &[],
             )
             .await
@@ -126,21 +126,7 @@ impl PriceMonitor {
         let mut assets = Vec::new();
         for row in rows {
             let asset: String = row.get(0);
-            let blockchain_str: String = row.get(1);
-            
-            // Parse blockchain string (case-insensitive)
-            let blockchain = match blockchain_str.to_lowercase().as_str() {
-                "solana" => Blockchain::Solana,
-                "ethereum" | "eth" => Blockchain::Ethereum,
-                "binancesmartchain" | "bsc" | "binance" => Blockchain::BinanceSmartChain,
-                "polygon" | "matic" => Blockchain::Polygon,
-                _ => {
-                    warn!("Unknown blockchain: {} (supported: solana, ethereum, bsc, polygon)", blockchain_str);
-                    continue;
-                }
-            };
-            
-            assets.push((asset, blockchain));
+            assets.push(asset);
         }
         
         Ok(assets)
@@ -149,11 +135,11 @@ impl PriceMonitor {
     /// Check benchmarks for a specific asset
     /// 
     /// **Validates: Requirements 2.3, 2.4**
-    async fn check_asset_benchmarks(&self, asset: &str, blockchain: &Blockchain) -> Result<()> {
-        debug!("Checking benchmarks for asset: {} on {:?}", asset, blockchain);
+    async fn check_asset_benchmarks(&self, asset: &str) -> Result<()> {
+        debug!("Checking benchmarks for asset: {}", asset);
         
-        // Get current price from Birdeye
-        let price_data = match self.birdeye_service.get_asset_price(blockchain, asset).await {
+        // Get current price from CoinMarketCap (uses symbol, not blockchain-specific)
+        let price_data = match self.coinmarketcap_service.get_price_by_symbol(asset).await {
             Ok(data) => data,
             Err(e) => {
                 warn!("Failed to fetch price for {}: {:?}", asset, e);

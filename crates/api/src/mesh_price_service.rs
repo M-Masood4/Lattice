@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::birdeye_service::BirdeyeService;
+use crate::coinmarketcap_service::CoinMarketCapService;
 use crate::coordination_service::CoordinationService;
 use crate::gossip_protocol::GossipProtocol;
 use crate::mesh_metrics::MeshMetricsCollector;
@@ -130,8 +130,8 @@ impl MeshPriceServiceHandler {
 /// - Network status tracking
 /// - WebSocket updates to clients
 pub struct MeshPriceService {
-    /// Birdeye service for fetching price data
-    birdeye_service: Arc<BirdeyeService>,
+    /// CoinMarketCap service for fetching price data
+    coinmarketcap_service: Arc<CoinMarketCapService>,
     /// Peer connection manager for P2P communication
     peer_manager: Arc<PeerConnectionManager>,
     /// Message tracker for deduplication
@@ -162,7 +162,7 @@ impl MeshPriceService {
     /// Initializes all components required for the mesh network price distribution system.
     /// 
     /// # Arguments
-    /// * `birdeye_service` - Service for fetching price data from Birdeye API
+    /// * `coinmarketcap_service` - Service for fetching price data from CoinMarketCap API
     /// * `peer_manager` - Manager for P2P connections
     /// * `redis` - Redis connection for caching and coordination
     /// * `db` - Database pool for persistent storage
@@ -171,7 +171,7 @@ impl MeshPriceService {
     /// # Returns
     /// A new MeshPriceService instance ready to start
     pub fn new(
-        birdeye_service: Arc<BirdeyeService>,
+        coinmarketcap_service: Arc<CoinMarketCapService>,
         peer_manager: Arc<PeerConnectionManager>,
         redis: redis::aio::ConnectionManager,
         db: database::DbPool,
@@ -211,7 +211,7 @@ impl MeshPriceService {
         let provider_config = Arc::new(RwLock::new(ProviderConfig::default()));
         
         Self {
-            birdeye_service,
+            coinmarketcap_service,
             peer_manager,
             message_tracker,
             price_cache,
@@ -390,7 +390,7 @@ impl MeshPriceService {
     /// Enable provider mode with API key validation
     /// 
     /// This method:
-    /// 1. Validates the API key with Birdeye API
+    /// 1. Validates the API key with CoinMarketCap API
     /// 2. Creates and starts a ProviderNode if validation succeeds
     /// 3. Updates the provider configuration
     /// 4. Updates network status to reflect provider mode
@@ -398,7 +398,7 @@ impl MeshPriceService {
     /// Requirements: 1.1, 1.2, 1.3, 1.5
     /// 
     /// # Arguments
-    /// * `api_key` - The Birdeye API key to validate and use
+    /// * `api_key` - The CoinMarketCap API key to validate and use
     /// 
     /// # Returns
     /// * `Ok(())` - Provider mode enabled successfully
@@ -408,7 +408,7 @@ impl MeshPriceService {
         
         // Create a temporary provider node for validation
         let temp_provider = ProviderNode::new(
-            Arc::clone(&self.birdeye_service),
+            Arc::clone(&self.coinmarketcap_service),
             Arc::clone(&self.peer_manager),
             Arc::clone(&self.coordination_service),
             Arc::clone(&self.metrics),
@@ -436,7 +436,7 @@ impl MeshPriceService {
         
         // Create and start provider node
         let provider = Arc::new(ProviderNode::new(
-            Arc::clone(&self.birdeye_service),
+            Arc::clone(&self.coinmarketcap_service),
             Arc::clone(&self.peer_manager),
             Arc::clone(&self.coordination_service),
             Arc::clone(&self.metrics),

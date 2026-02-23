@@ -205,7 +205,8 @@ async function loadPortfolio(walletAddress) {
         const response = await fetch(`${API_BASE_URL}/api/wallets/${walletAddress}/multi-chain-portfolio`);
         
         if (!response.ok) {
-            throw new Error('Failed to load portfolio');
+            const errorData = await response.json().catch(() => ({ error: 'Failed to load portfolio' }));
+            throw new Error(errorData.error || 'Failed to load portfolio');
         }
 
         const data = await response.json();
@@ -215,8 +216,14 @@ async function loadPortfolio(walletAddress) {
         
     } catch (error) {
         console.error('Error loading portfolio:', error);
-        // Display mock data for demo purposes
-        displayMockPortfolio();
+        showToast(`Failed to load portfolio: ${error.message}`, 'error');
+        
+        // Display empty state instead of mock data
+        const assetsList = document.getElementById('assetsList');
+        assetsList.innerHTML = '<p class="empty-state">Failed to load portfolio. Please try again.</p>';
+        document.getElementById('totalValue').textContent = '0.00';
+        document.getElementById('assetCount').textContent = '0';
+        document.getElementById('blockchainCount').textContent = '0';
     }
 }
 
@@ -339,27 +346,7 @@ function setupBlockchainFilters() {
     });
 }
 
-function displayMockPortfolio() {
-    const mockPortfolio = {
-        total_value_usd: 25750.75,
-        positions_by_chain: {
-            'solana': [
-                { token_symbol: 'SOL', amount: '50.5', value_usd: 10000 },
-                { token_symbol: 'USDC', amount: '2500', value_usd: 2500 }
-            ],
-            'ethereum': [
-                { token_symbol: 'ETH', amount: '5.2', value_usd: 12000 },
-                { token_symbol: 'USDT', amount: '1000', value_usd: 1000 }
-            ],
-            'polygon': [
-                { token_symbol: 'MATIC', amount: '500', value_usd: 250.75 }
-            ]
-        }
-    };
-    
-    displayPortfolio(mockPortfolio);
-    document.getElementById('whaleCount').textContent = '3';
-}
+// Mock portfolio function removed - using real Tantum API data only
 
 // Whales Management
 async function loadWhales() {
